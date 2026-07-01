@@ -14,7 +14,7 @@ What's done:
 
 What's left:
 - ✅ Verify Open-Meteo weather API against one real AIS coordinate
-- ⬜ Download and profile World Port Index
+- ✅ Download and profile World Port Index
 - ⬜ Move ingestion logic into `src/ingestion/fetch_ais.py` and `src/ingestion/inspect_wpi.py`
 - ⬜ Create branch `feature/ingestion`, PR, merge to main
 

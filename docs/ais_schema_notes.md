@@ -72,6 +72,34 @@ Both sources are model-derived reanalysis/forecast-model output, not direct stat
 - Fusion logic must call two different hostnames depending on variable
 - With 7.28M rows/day, one API call per ping is not feasible — batch strategy required: group AIS pings by rounded hour + approximate coordinate grid cell, make one API call per unique (hour, grid cell) combination, then join back to individual pings
 
+## World Port Index (WPI) — UpdatedPub150.csv (profiled 2026-07-01)
+
+- **Source:** NGA World Port Index, Publication 150
+- **Rows:** 3,804 (one row per port, global coverage)
+- **Columns:** 109
+- **Duplicate rows:** 0
+
+### Columns used in this project
+- `Latitude`, `Longitude` — used for proximity join with AIS pings
+- `Main Port Name` — for labeling flagged events
+- `Harbor Size` — confirmed in scope; see breakdown below
+
+### Harbor Size breakdown (3,804 ports total)
+| Value | Count | % |
+|---|---|---|
+| Very Small | 2,114 | 55.6% |
+| Small | 1,017 | 26.7% |
+| Medium | 370 | 9.7% |
+| Large | 174 | 4.6% |
+| *(blank)* | 129 | 3.4% |
+
+**Data quality note:** The 129 "blank" Harbor Size entries are a single whitespace character (`' '`), not NaN or empty string (confirmed via `repr()`). Any code checking for unknown Harbor Size must use `harbor_size.strip() == ''` rather than a direct null or empty-string check, or these 129 rows will be silently missed.
+
+**Phase 3 design decision (DECIDED):** Start with a flat proximity radius applied to all ports, to get the port-proximity join working end-to-end. Upgrade to a Harbor Size–tiered radius (e.g., Large = 10 km, Medium = 5 km, Small = 2 km, Very Small = 1 km) as a fast follow-up once the flat version works — the tiered version only adds a lookup table on top of the same distance calculation, so it's a low-cost upgrade, not a rebuild. The 129 whitespace-only ports default to the smallest/tightest radius rather than being excluded.
+
+### Columns out of scope
+The remaining 105 columns cover facility flags (wharves, cranes, dry docks), communications equipment, services, supplies, pilotage, quarantine, entrance restrictions, vessel dimension limits, and navigational chart references. None are needed for anomaly detection and will be dropped at load time in the fusion module.
+
 ## What This Hypothesis Cannot Yet Claim
 - Ship-to-ship transfer detection not yet scoped
 - Vessel-type-specific thresholds not yet defined
