@@ -225,3 +225,7 @@ data/processed/*
 .env
 .venv/
 venv/
+
+# Large data files
+*.zip
+*.csv
