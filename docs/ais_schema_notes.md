@@ -1,4 +1,4 @@
-# AIS Schema Notes — AIS_2024_01_15.csv
+# AIS Schema Notes ï¿½ AIS_2024_01_15.csv
 Generated from Phase 1 exploration notebook.
 
 ## Dataset Overview
@@ -12,14 +12,14 @@ MMSI, BaseDateTime, LAT, LON, SOG, COG, Heading, VesselName, IMO,
 CallSign, VesselType, Status, Length, Width, Draft, Cargo, TransceiverClass
 
 ## Sentinel Values (look valid but mean unavailable)
-- COG = 360.0: 1,163,841 rows (16.0%) — course unavailable
-- SOG = 102.3: 15,513 rows (0.2%) — speed unavailable
-- Heading = 511.0: 3,724,055 rows (51.1%) — heading unavailable
-- IMO = IMO0000000: 1,759,288 rows (24.1%) — fake/missing IMO
+- COG = 360.0: 1,163,841 rows (16.0%) ï¿½ course unavailable
+- SOG = 102.3: 15,513 rows (0.2%) ï¿½ speed unavailable
+- Heading = 511.0: 3,724,055 rows (51.1%) ï¿½ heading unavailable
+- IMO = IMO0000000: 1,759,288 rows (24.1%) ï¿½ fake/missing IMO
 
 ## Null Rates
-- MMSI: 0% null — most reliable identifier, used as primary key
-- IMO: 30.9% null — unreliable as join key
+- MMSI: 0% null ï¿½ most reliable identifier, used as primary key
+- IMO: 30.9% null ï¿½ unreliable as join key
 - Status: 26.2% null
 - Draft: 26.2% null
 - Cargo: 26.2% null
@@ -31,10 +31,10 @@ CallSign, VesselType, Status, Length, Width, Draft, Cargo, TransceiverClass
 - Cause: multiple shore receivers logging the same broadcast
 
 ## Key Design Decisions for Phase 2
-1. Use MMSI as primary vessel identifier — only field with 0% nulls
+1. Use MMSI as primary vessel identifier ï¿½ only field with 0% nulls
 2. Flag and exclude sentinel values before any anomaly logic runs
-3. Draft and Cargo too sparse for anomaly rules — 26% missing
-4. Heading unreliable for direction rules — 51% are sentinel 511.0
+3. Draft and Cargo too sparse for anomaly rules ï¿½ 26% missing
+4. Heading unreliable for direction rules ï¿½ 51% are sentinel 511.0
 5. Deduplicate on (MMSI, BaseDateTime, LAT, LON) before processing
 
 ## Project Hypothesis (written before any anomaly rules are built)
@@ -57,8 +57,22 @@ by distinguishing legitimate port anchorage from open-water anomalies.
 This hypothesis will be compared against actual flag counts,
 flag distributions, and false positive rates at project completion.
 
+## Weather API â€” Confirmed Viable (tested 2026-07-01)
+
+Both windspeed and visibility are confirmed in scope for the going-dark anomaly rule.
+They require two different Open-Meteo hostnames:
+
+- **Windspeed:** `archive-api.open-meteo.com/v1/archive` â€” confirmed working for 2024-01-15, 24/24 hours populated, units: km/h
+- **Visibility:** `historical-forecast-api.open-meteo.com/v1/forecast` â€” confirmed working for 2024-01-15, 24/24 hours populated (range: 24,000â€“48,200 m), units: meters. This is Open-Meteo's dedicated historical archive for forecast-model data â€” a separate hostname from both `/v1/archive` and the standard `api.open-meteo.com/v1/forecast`
+- **Standard forecast endpoint** (`api.open-meteo.com/v1/forecast`) â€” only supports dates within ~92 days of today; returns 400 for Jan 2024 data. Not usable here.
+
+Both sources are model-derived reanalysis/forecast-model output, not direct station observations. Appropriate as a plausibility filter for going-dark (e.g., high wind or low visibility = less suspicious signal gap), not claimed as precise meteorological ground truth.
+
+### Phase 3 Design Notes (weather fusion)
+- Fusion logic must call two different hostnames depending on variable
+- With 7.28M rows/day, one API call per ping is not feasible â€” batch strategy required: group AIS pings by rounded hour + approximate coordinate grid cell, make one API call per unique (hour, grid cell) combination, then join back to individual pings
+
 ## What This Hypothesis Cannot Yet Claim
-- Weather context not yet confirmed as a viable data source
 - Ship-to-ship transfer detection not yet scoped
 - Vessel-type-specific thresholds not yet defined
 - Multi-day or multi-month patterns not yet in scope

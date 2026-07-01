@@ -13,7 +13,7 @@ What's done:
 - ✅ Exploration notebook committed to `notebooks/01_ais_exploration.ipynb`
 
 What's left:
-- ⬜ Verify Open-Meteo weather API against one real AIS coordinate
+- ✅ Verify Open-Meteo weather API against one real AIS coordinate
 - ⬜ Download and profile World Port Index
 - ⬜ Move ingestion logic into `src/ingestion/fetch_ais.py` and `src/ingestion/inspect_wpi.py`
 - ⬜ Create branch `feature/ingestion`, PR, merge to main
@@ -50,7 +50,7 @@ Joins the three data sources together and runs the actual anomaly detection logi
 Specific tasks:
 - ⬜ Profile and confirm World Port Index schema (carried from Phase 1)
 - ⬜ Join AIS with World Port Index on lat/lon proximity (defines "near a port")
-- ⬜ If weather API confirmed: join weather context on timestamp + coordinates for going dark rule
+- ⬜ Join weather context (windspeed via archive-api, visibility via historical-forecast-api) on rounded hour + coordinate grid cell — batch API calls, not one per ping
 - ⬜ Build anomaly rule 1: AIS gap / going dark (with weather context layer if confirmed)
 - ⬜ Build anomaly rule 2: Loitering (near-zero SOG in open water, not near port)
 - ⬜ Build anomaly rule 3: Speed inconsistency (physically impossible movement between pings)
