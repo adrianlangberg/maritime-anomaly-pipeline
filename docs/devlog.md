@@ -49,6 +49,23 @@ running a blind dedup.
 **Result:** 7,284,415 -> 7,284,239 rows (176 removed).
 Implemented as drop_exact_duplicates() in src/validation/rules.py.
 
+## 2026-07-02 — Phase 2: IMO sentinel flag
+
+IMO == 'IMO0000000' is the AIS placeholder for vessels with no real IMO number.
+Result: 1,759,246 rows flagged IMO_FLAGGED=True, 0 rows dropped. Slightly below
+the raw-file count of 1,759,288 (42 were already removed as duplicates,
+direct-counted).
+
+Decision: flag, not null, not drop.
+- None of the 5 anomaly rules read IMO directly (identity inconsistency is
+  scoped as same MMSI, different VesselName).
+- Nulling would blend genuine nulls (30.9% of rows) with placeholders (24.1%),
+  making the two cases indistinguishable downstream.
+- Dropping would lose 24% of rows over a field no rule uses.
+- Flagging preserves the original IMO value, marks it unreliable, and loses nothing.
+Implemented as flag_unreliable_imo() in src/validation/rules.py.
+IMO_FLAGGED boolean column added; IMO field itself left untouched.
+
 ## 2026-07-02 — Phase 2: Heading sentinel
 
 Heading == 511 is the AIS "heading unavailable" sentinel. Nulled, rows kept.

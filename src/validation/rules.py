@@ -64,3 +64,17 @@ def null_unavailable_heading(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     cleaned = df.copy()
     cleaned.loc[mask, "Heading"] = float("nan")
     return cleaned, int(mask.sum())
+
+
+def flag_unreliable_imo(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Add IMO_FLAGGED boolean column; True where IMO == 'IMO0000000'. Rows are kept.
+
+    IMO0000000 is the AIS placeholder for vessels with no real IMO number. The IMO
+    field itself is left untouched so that real values, real nulls, and placeholders
+    remain distinguishable. The flag lets downstream code filter or weight by IMO
+    reliability without losing the original field.
+    """
+    mask = df["IMO"] == "IMO0000000"
+    cleaned = df.copy()
+    cleaned["IMO_FLAGGED"] = mask
+    return cleaned, int(mask.sum())
