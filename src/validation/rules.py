@@ -50,3 +50,17 @@ def null_unavailable_sog(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     cleaned = df.copy()
     cleaned.loc[mask, "SOG"] = float("nan")
     return cleaned, int(mask.sum())
+
+
+def null_unavailable_heading(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Replace Heading == 511 with NaN. Rows are kept.
+
+    511 is the AIS sentinel for "heading unavailable". Like COG and SOG,
+    no anomaly rule in this pipeline consumes Heading directly, so nulling
+    preserves all position and identity data for the ~51% of pings where
+    heading is unavailable.
+    """
+    mask = df["Heading"] == 511
+    cleaned = df.copy()
+    cleaned.loc[mask, "Heading"] = float("nan")
+    return cleaned, int(mask.sum())

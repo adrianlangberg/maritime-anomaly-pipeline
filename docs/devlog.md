@@ -49,10 +49,18 @@ running a blind dedup.
 **Result:** 7,284,415 -> 7,284,239 rows (176 removed).
 Implemented as drop_exact_duplicates() in src/validation/rules.py.
 
+## 2026-07-02 — Phase 2: Heading sentinel
+
+Heading == 511 is the AIS "heading unavailable" sentinel. Nulled, rows kept.
+Result: 3,723,977 values set to NaN, 0 rows dropped. Slightly below the
+raw-file count of 3,724,055 (78 were already removed as duplicates).
+Implemented as null_unavailable_heading() in src/validation/rules.py.
+
 ## 2026-07-02 — Phase 2: SOG sentinel
 
 SOG == 102.3 is the AIS "speed unavailable" sentinel. Nulled, rows kept.
-Result: 15,513 values set to NaN, 0 rows dropped.
+Result: 15,512 values set to NaN, 0 rows dropped. Slightly below the
+raw-file count of 15,513 (1 was already removed as a duplicate).
 Implemented as null_unavailable_sog() in src/validation/rules.py.
 
 **Preliminary observation (unverified -- defer to Phase 3):** A scan of the
