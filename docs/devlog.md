@@ -48,3 +48,10 @@ running a blind dedup.
 
 **Result:** 7,284,415 -> 7,284,239 rows (176 removed).
 Implemented as drop_exact_duplicates() in src/validation/rules.py.
+
+## 2026-07-01 — Phase 2: COG sentinel
+
+COG=360.0 = "course unavailable" sentinel. No rule uses COG, so null the field
+(don't drop rows). Result: 1,163,812 values set to NaN, 0 rows dropped.
+Slightly below audit's 1,163,841 (29 were already removed as duplicates).
+Implemented as null_unavailable_cog() in src/validation/rules.py.
