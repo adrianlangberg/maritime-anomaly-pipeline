@@ -49,6 +49,19 @@ running a blind dedup.
 **Result:** 7,284,415 -> 7,284,239 rows (176 removed).
 Implemented as drop_exact_duplicates() in src/validation/rules.py.
 
+## 2026-07-02 — Phase 2: SOG sentinel
+
+SOG == 102.3 is the AIS "speed unavailable" sentinel. Nulled, rows kept.
+Result: 15,513 values set to NaN, 0 rows dropped.
+Implemented as null_unavailable_sog() in src/validation/rules.py.
+
+**Preliminary observation (unverified -- defer to Phase 3):** A scan of the
+raw file shows ~244 rows with SOG > 50 knots outside the sentinel, clustered
+across a small number of MMSIs. Not cleaned here -- these are candidates for
+the speed-inconsistency anomaly rule, which will compute speed from position
+deltas and compare against reported SOG. Specific breakdowns to be confirmed
+when building that rule.
+
 ## 2026-07-01 — Phase 2: COG sentinel
 
 COG=360.0 = "course unavailable" sentinel. No rule uses COG, so null the field

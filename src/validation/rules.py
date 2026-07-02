@@ -36,3 +36,17 @@ def null_unavailable_cog(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     cleaned = df.copy()
     cleaned.loc[mask, "COG"] = float("nan")
     return cleaned, int(mask.sum())
+
+
+def null_unavailable_sog(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Replace SOG == 102.3 with NaN. Rows are kept.
+
+    102.3 is the AIS sentinel for "speed unavailable". No anomaly rule
+    consumes reported SOG directly — the speed-inconsistency rule derives
+    speed from consecutive position deltas, not from this field. Nulling
+    preserves all position and identity data for affected pings.
+    """
+    mask = df["SOG"] == 102.3
+    cleaned = df.copy()
+    cleaned.loc[mask, "SOG"] = float("nan")
+    return cleaned, int(mask.sum())
