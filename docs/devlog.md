@@ -49,6 +49,17 @@ running a blind dedup.
 **Result:** 7,284,415 -> 7,284,239 rows (176 removed).
 Implemented as drop_exact_duplicates() in src/validation/rules.py.
 
+## 2026-07-02 — Phase 2: Status / Draft / Cargo (no action)
+
+Status, Draft, and Cargo each have ~26% nulls with no defined sentinel values.
+Decision: leave them as-is. Filling nulls would require inventing data that was
+never broadcast -- imputation here is fabrication, not cleaning.
+
+Note: Status may be useful in Phase 3 for the loitering rule. A vessel with
+Status = 'at anchor' in open water reads differently than one with no status
+at all -- the field could help distinguish legitimate anchorage from suspicious
+loitering. Revisit at that point.
+
 ## 2026-07-02 — Phase 2: IMO sentinel flag
 
 IMO == 'IMO0000000' is the AIS placeholder for vessels with no real IMO number.
