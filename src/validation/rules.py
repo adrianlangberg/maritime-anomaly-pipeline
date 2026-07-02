@@ -21,3 +21,18 @@ def drop_exact_duplicates(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     before = len(df)
     cleaned = df[~df.duplicated(keep="first")].reset_index(drop=True)
     return cleaned, before - len(cleaned)
+
+
+def null_unavailable_cog(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Replace COG == 360.0 with NaN. Rows are kept.
+
+    360.0 is the AIS sentinel for "course unavailable" — it is not a real
+    compass bearing (the scale ends at 359.9). No anomaly rule in this
+    pipeline consumes COG, so nulling the field rather than dropping rows
+    preserves all position, speed, and identity data for the 16% of pings
+    where course is unavailable.
+    """
+    mask = df["COG"] == 360.0
+    cleaned = df.copy()
+    cleaned.loc[mask, "COG"] = float("nan")
+    return cleaned, int(mask.sum())
