@@ -1,0 +1,80 @@
+"""
+rules.py — Named validation rule functions for AIS data cleaning.
+
+Each function takes a DataFrame, returns (cleaned_df, n_rows_affected).
+Functions are pure — they do not modify the input DataFrame in place.
+"""
+import pandas as pd
+
+
+def drop_exact_duplicates(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Drop rows that are identical across all 17 columns.
+
+    Uses full-row deduplication rather than a subset key. A row is only
+    removed if every single field matches another row exactly — the most
+    conservative possible definition of a duplicate.
+
+    Confirmed on AIS_2024_01_15.csv: drops 176 rows. The 9 vessel pairs
+    that share (MMSI, BaseDateTime) but differ in position/course are
+    kept because they are not full-row identical.
+    """
+    before = len(df)
+    cleaned = df[~df.duplicated(keep="first")].reset_index(drop=True)
+    return cleaned, before - len(cleaned)
+
+
+def null_unavailable_cog(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Replace COG == 360.0 with NaN. Rows are kept.
+
+    360.0 is the AIS sentinel for "course unavailable" — it is not a real
+    compass bearing (the scale ends at 359.9). No anomaly rule in this
+    pipeline consumes COG, so nulling the field rather than dropping rows
+    preserves all position, speed, and identity data for the 16% of pings
+    where course is unavailable.
+    """
+    mask = df["COG"] == 360.0
+    cleaned = df.copy()
+    cleaned.loc[mask, "COG"] = float("nan")
+    return cleaned, int(mask.sum())
+
+
+def null_unavailable_sog(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Replace SOG == 102.3 with NaN. Rows are kept.
+
+    102.3 is the AIS sentinel for "speed unavailable". No anomaly rule
+    consumes reported SOG directly — the speed-inconsistency rule derives
+    speed from consecutive position deltas, not from this field. Nulling
+    preserves all position and identity data for affected pings.
+    """
+    mask = df["SOG"] == 102.3
+    cleaned = df.copy()
+    cleaned.loc[mask, "SOG"] = float("nan")
+    return cleaned, int(mask.sum())
+
+
+def null_unavailable_heading(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Replace Heading == 511 with NaN. Rows are kept.
+
+    511 is the AIS sentinel for "heading unavailable". Like COG and SOG,
+    no anomaly rule in this pipeline consumes Heading directly, so nulling
+    preserves all position and identity data for the ~51% of pings where
+    heading is unavailable.
+    """
+    mask = df["Heading"] == 511
+    cleaned = df.copy()
+    cleaned.loc[mask, "Heading"] = float("nan")
+    return cleaned, int(mask.sum())
+
+
+def flag_unreliable_imo(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Add IMO_FLAGGED boolean column; True where IMO == 'IMO0000000'. Rows are kept.
+
+    IMO0000000 is the AIS placeholder for vessels with no real IMO number. The IMO
+    field itself is left untouched so that real values, real nulls, and placeholders
+    remain distinguishable. The flag lets downstream code filter or weight by IMO
+    reliability without losing the original field.
+    """
+    mask = df["IMO"] == "IMO0000000"
+    cleaned = df.copy()
+    cleaned["IMO_FLAGGED"] = mask
+    return cleaned, int(mask.sum())
