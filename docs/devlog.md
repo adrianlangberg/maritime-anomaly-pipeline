@@ -28,3 +28,23 @@ values are populated, before trusting an API test result.
 - Verified Claude Code reads @docs/ais_schema_notes.md correctly
 - Cleaned up a stray "git status" file that got accidentally created
 - Next session: verify Open-Meteo weather API, then WPI download
+
+## 2026-07-01 — Phase 2: Duplicate removal (first cleaning rule)
+
+Investigated why duplicate rows exist before deleting anything, rather than
+running a blind dedup.
+
+**What we found:**
+- 176 rows are exact full-row duplicates (identical across all 17 columns).
+- 18 more rows share the same vessel (MMSI) and timestamp but differ in
+  position/course — these are legitimate distinct pings, NOT duplicates.
+
+**Decision — full-row deduplication (Option A):**
+- Deletes a row only if every one of the 17 columns matches another row.
+- Considered a key-based approach (MMSI + time + LAT + LON) but it produces
+  the identical result on this file while being harder to justify. Full-row
+  is the most conservative option and needs no column-choice explanation.
+- The 18 differing pings are correctly kept.
+
+**Result:** 7,284,415 -> 7,284,239 rows (176 removed).
+Implemented as drop_exact_duplicates() in src/validation/rules.py.
