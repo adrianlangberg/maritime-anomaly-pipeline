@@ -5,40 +5,31 @@ Git, GitHub, Python, venv, folder skeleton, README, dependencies installed, four
 
 ---
 
-**Phase 1 — Ingestion & Schema Exploration (Week 1, IN PROGRESS)**
+**Phase 1 — Ingestion & Schema Exploration (Week 1) ✅ COMPLETE**
 
-What's done:
 - ✅ AIS data downloaded and profiled (7.28M rows, 17 columns)
 - ✅ Schema notes and hypothesis committed to `docs/ais_schema_notes.md`
 - ✅ Exploration notebook committed to `notebooks/01_ais_exploration.ipynb`
-
-What's left:
 - ✅ Verify Open-Meteo weather API against one real AIS coordinate
 - ✅ Download and profile World Port Index
-- ⬜ Move ingestion logic into `src/ingestion/fetch_ais.py` and `src/ingestion/inspect_wpi.py`
-- ⬜ Create branch `feature/ingestion`, PR, merge to main
-
-Closes when: all ingestion scripts live in `src/ingestion/`, WPI and weather API both resolved, PR merged.
+- ✅ Move ingestion logic into `src/ingestion/fetch_ais.py` and `src/ingestion/inspect_wpi.py`
+- ✅ Create branch `feature/ingestion`, PR, merge to main
 
 ---
 
-**Phase 2 — Validation & Cleaning (Week 2)**
+**Phase 2 — Validation & Cleaning (Week 2) ✅ COMPLETE**
 
-What this phase does:
-Takes the raw AIS data and makes it trustworthy before anything else touches it.
+- ✅ Remove 176 duplicate rows (full-row dedup; 9 same-MMSI/timestamp pairs with differing position kept)
+- ✅ Exclude COG = 360.0 sentinel → 1,163,812 nulled (1,163,841 raw minus 29 in dropped dupes)
+- ✅ Exclude SOG = 102.3 sentinel → 15,512 nulled (15,513 raw minus 1 in dropped dupes)
+- ✅ Exclude Heading = 511.0 sentinel → 3,723,977 nulled (3,724,055 raw minus 78 in dropped dupes)
+- ✅ Flag IMO = IMO0000000 → 1,759,246 flagged via IMO_FLAGGED boolean (1,759,288 raw minus 42 in dropped dupes)
+- ✅ Status/Draft/Cargo: deliberate no-op — ~26% nulls, no sentinel, filling would invent data
+- ✅ Named validation rule functions in `src/validation/rules.py`
+- ✅ `src/validation/clean_ais.py` orchestrates full chain, writes `data/processed/AIS_2024_01_15_clean.csv`
+- ✅ Branch `feature/validation`, PR #2, merged to main
 
-Specific tasks:
-- ⬜ Remove 176 duplicate rows
-- ⬜ Exclude COG = 360.0 sentinel (1,163,841 rows)
-- ⬜ Exclude SOG = 102.3 sentinel (15,513 rows)
-- ⬜ Exclude Heading = 511.0 sentinel (3,724,055 rows)
-- ⬜ Flag IMO = IMO0000000 as unreliable (1,759,288 rows)
-- ⬜ Handle nulls in Status, Draft, Cargo per design decisions
-- ⬜ Build named, explicit validation rule functions (not ad hoc cleaning)
-- ⬜ Output clean dataset to `data/processed/`
-- ⬜ Branch: `feature/validation`, PR, merge to main
-
-Closes when: clean dataset in `data/processed/`, every validation rule is a named, documented function, PR merged.
+Output: 7,284,239 rows × 18 columns, 846.6 MB.
 
 ---
 
