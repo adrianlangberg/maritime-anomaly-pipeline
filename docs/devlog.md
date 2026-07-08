@@ -1,79 +1,161 @@
 ## 2026-07-08 - Phase 3: Loitering anomaly rule
 
-Built the first anomaly rule against the fused AIS + port-proximity output.
+### Quick update
 
-**Goal of the rule:**
-Detect vessels with near-zero speed in open water, away from known ports. The
-rule should produce a reviewable anomaly-event table, not just a giant filtered
-copy of AIS pings.
+Built the first anomaly rule: loitering detection.
+The first version found too many row-level pings, so I upgraded the rule to
+group pings into vessel-level episodes. The final output is now a reviewable
+anomaly table: one row per loitering episode, with vessel ID, time window,
+duration, location, port distance, and suspicion level.
 
-**Initial row-level result:**
-- Input fused rows: 7,284,239.
-- Slow pings (`SOG <= 1.0`): 5,537,974.
-- Open-water pings (`near_port == False`): 1,331,915.
-- Row-level loitering candidates: 637,961 pings across 2,169 MMSIs.
+### Initial run
 
-**Interpretation:**
-The row-level filter was useful for discovery, but too noisy as a final anomaly
-output. AIS is a broadcast stream. One stationary vessel can produce hundreds
-or thousands of pings in a day, so "one slow ping" is not the same thing as
-"one loitering event." The right event shape is an episode with a start time,
-end time, duration, representative position, and context.
+The first script was a row-level filtering script.
 
-**Upgrade decision: row-level candidates -> episode-level events**
-- Sort candidate pings by `MMSI` and `BaseDateTime`.
-- Start a new episode when the next candidate ping for the same vessel is more
-  than 30 minutes after the previous candidate ping.
-- Keep only episodes with at least 3 candidate pings and at least 60 minutes of
-  duration.
-- Emit one row per episode, with median lat/lon, median SOG, nearest port,
-  median port distance, duration, status context, and suspicion level.
+It looked for AIS pings where:
 
-**Alternatives tested and rejected:**
+- `SOG <= 1.0`
+- `near_port == False`
+- `port_distance_km > 30`
 
-| Strategy | Candidate pings | Final episodes | Unique MMSI | Decision |
-|---|---:|---:|---:|---|
-| Episode baseline: `SOG <= 1.0`, `distance > 30 km`, duration >= 60 min | 637,961 | 2,933 | 1,566 | Chosen baseline |
-| Stricter speed: `SOG <= 0.5` | 612,245 | 2,857 | 1,519 | Rejected; barely changes results, so speed threshold is not the main lever |
-| Stricter distance: `distance > 50 km` | 321,550 | 1,567 | 841 | Rejected for now; may hide coastal/anchorage cases just outside WPI coverage |
-| Stricter distance: `distance > 100 km` | 71,132 | 397 | 215 | Rejected for now; too aggressive before tiered port radius or richer context |
-| Stricter duration: `duration >= 120 min` | 637,961 | 2,361 | 1,387 | Useful later as severity, but not the first pass |
-| Stricter duration: `duration >= 360 min` | 637,961 | 1,065 | 1,030 | Too restrictive for initial detection; good candidate for high severity |
-| Exclude `at_anchor` / `moored` status | 637,961 | 2,372 | 1,286 | Rejected as hard filter; status is optional/noisy and should be context first |
-| Exclude `at_anchor` / `moored` / `undefined` | 637,961 | 2,190 | 1,188 | Rejected; drops too much evidence based on an unreliable field |
+Results:
 
-**Why status is context, not a delete filter:**
-`Status` has missing/optional values and may not be consistently updated. Some
-status values reduce suspicion (`at_anchor`, `moored`), while others increase it
-(`under_way_using_engine`, `restricted_maneuverability`, `engaged_in_fishing`).
-The rule keeps the event and adds `primary_status_label` plus
-`suspicion_level` instead of silently dropping records.
+- Input fused rows: `7,284,239`
+- Slow pings: `5,537,974`
+- Open-water pings: `1,331,915`
+- Row-level loitering candidates: `637,961`
+- Unique MMSIs in row-level candidates: `2,169`
 
-**Final rule output:**
-- Candidate pings: 637,961.
-- Candidate episodes: 5,780.
-- Final event episodes: 2,933.
-- Unique MMSIs flagged: 1,566.
-- Duration spread: min 60.0 minutes, median 206.2 minutes, max 1439.9 minutes.
-- Distance spread: min 30.0 km, median 52.7 km, max 342.5 km.
-- Suspicion levels: high 1,649; medium 1,000; low 284.
+Short conclusion:
 
-**Output:**
-- Wrote `data/processed/loitering_events.csv`.
-- The generated CSV is ignored by git.
-- Source rule is `src/anomaly_rules/loitering.py`.
+The initial result was too large and noisy to use as a final anomaly output.
+Since AIS is a broadcast stream, a stationary vessel can produce hundreds or
+thousands of pings in a day. That means one slow ping cannot be considered a
+loitering event by itself.
 
-**Interview story:**
-The first version produced too many row-level flags. I diagnosed that the unit
-of analysis was wrong: AIS pings are observations, but anomaly detection needs
-events. I tested stricter speed, distance, duration, and status filters. The
-chosen approach preserves evidence, collapses noisy rows into reviewable
-episodes, and uses status as explanatory context rather than as a brittle hard
-filter.
+### Change in strategy
 
-Next: commit the loitering rule, then continue Phase 3 with another anomaly
-rule. Weather fusion is still planned, but it is more directly useful for the
-signal-gap / going-dark rule than for loitering.
+The first script found possible evidence, but the unit of analysis was wrong.
+
+The pipeline should not treat every slow ping as its own anomaly. Instead, it
+should group related pings into behavior windows.
+
+So I changed the rule from:
+
+> one row = one possible anomaly
+
+to:
+
+> one vessel episode = one reviewable anomaly event
+
+### Episode model
+
+To define a loitering episode, the script sorts pings by:
+
+- `MMSI` - the vessel ID
+- `BaseDateTime` - the timestamp
+
+This puts each vessel's pings together and orders them by time. Without sorting
+by vessel and time, we cannot build a timeline.
+
+Then the script applies three rules:
+
+1. If more than 30 minutes pass between two candidate pings from the same vessel,
+   the old episode ends and a new one starts.
+2. A final episode must last at least 60 minutes.
+3. A final episode must contain at least 3 candidate pings.
+
+In short, a loitering episode means:
+
+> the same vessel, repeatedly slow, away from a port, for at least an hour.
+
+This does not prove suspicious activity by itself. It creates a stronger
+starting point for review.
+
+### Upgraded run
+
+The upgraded script is an episode-level anomaly detection script.
+
+Results:
+
+- Candidate pings: `637,961`
+- Candidate episodes before final filtering: `5,780`
+- Final loitering episodes: `2,933`
+- Unique MMSIs flagged: `1,566`
+
+The `5,780` number means the raw candidate pings grouped into 5,780 possible
+slow-open-water behavior windows.
+
+The `2,933` number means 2,933 episodes were substantial enough to keep after
+applying:
+
+- `duration >= 60 minutes`
+- `candidate_ping_count >= 3`
+
+`1,566 unique MMSIs` means 1,566 distinct vessel IDs had at least one final
+loitering episode.
+
+### Duration results
+
+The median final episode lasted `206.2 minutes`, or about 3.4 hours.
+
+That means half of the final loitering episodes lasted less than about 3.4
+hours, and half lasted longer.
+
+The shortest final episode lasted `60.0 minutes`, because that was the minimum
+threshold.
+
+The longest final episode lasted `1439.9 minutes`, almost the full 24-hour day.
+
+### Suspicion levels
+
+I also added suspicion levels to help prioritize review.
+
+Low suspicion:
+
+```text
+primary_status is at_anchor or moored
+AND median_port_distance_km < 50
+```
+
+This might be normal anchoring or mooring just outside the 30 km port radius.
+
+High suspicion:
+
+```text
+primary_status is under_way / not_under_command / restricted / fishing / sailing
+OR median_port_distance_km >= 100
+OR duration_minutes >= 360
+```
+
+This deserves higher review priority because the episode lasted a long time,
+happened far from port, or the vessel's status suggests it may have been active
+instead of simply anchored.
+
+Medium suspicion:
+
+```text
+everything else
+```
+
+This is still a slow open-water episode, but it does not have an extra signal
+strong enough to call it high priority, and it does not look explainable enough
+to call it low priority.
+
+Final suspicion-level counts:
+
+- High: `1,649`
+- Medium: `1,000`
+- Low: `284`
+
+### Final takeaway
+
+The loitering rule now produces structured anomaly events instead of noisy
+ping-level flags.
+
+This gets the project closer to the Phase 3 goal: a flagged events table with
+anomaly type, vessel ID, time window, coordinates, duration, and suspicion
+context.
 
 ---
 
