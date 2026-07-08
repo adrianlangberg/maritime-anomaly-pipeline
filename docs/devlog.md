@@ -1,3 +1,82 @@
+## 2026-07-08 - Phase 3: Loitering anomaly rule
+
+Built the first anomaly rule against the fused AIS + port-proximity output.
+
+**Goal of the rule:**
+Detect vessels with near-zero speed in open water, away from known ports. The
+rule should produce a reviewable anomaly-event table, not just a giant filtered
+copy of AIS pings.
+
+**Initial row-level result:**
+- Input fused rows: 7,284,239.
+- Slow pings (`SOG <= 1.0`): 5,537,974.
+- Open-water pings (`near_port == False`): 1,331,915.
+- Row-level loitering candidates: 637,961 pings across 2,169 MMSIs.
+
+**Interpretation:**
+The row-level filter was useful for discovery, but too noisy as a final anomaly
+output. AIS is a broadcast stream. One stationary vessel can produce hundreds
+or thousands of pings in a day, so "one slow ping" is not the same thing as
+"one loitering event." The right event shape is an episode with a start time,
+end time, duration, representative position, and context.
+
+**Upgrade decision: row-level candidates -> episode-level events**
+- Sort candidate pings by `MMSI` and `BaseDateTime`.
+- Start a new episode when the next candidate ping for the same vessel is more
+  than 30 minutes after the previous candidate ping.
+- Keep only episodes with at least 3 candidate pings and at least 60 minutes of
+  duration.
+- Emit one row per episode, with median lat/lon, median SOG, nearest port,
+  median port distance, duration, status context, and suspicion level.
+
+**Alternatives tested and rejected:**
+
+| Strategy | Candidate pings | Final episodes | Unique MMSI | Decision |
+|---|---:|---:|---:|---|
+| Episode baseline: `SOG <= 1.0`, `distance > 30 km`, duration >= 60 min | 637,961 | 2,933 | 1,566 | Chosen baseline |
+| Stricter speed: `SOG <= 0.5` | 612,245 | 2,857 | 1,519 | Rejected; barely changes results, so speed threshold is not the main lever |
+| Stricter distance: `distance > 50 km` | 321,550 | 1,567 | 841 | Rejected for now; may hide coastal/anchorage cases just outside WPI coverage |
+| Stricter distance: `distance > 100 km` | 71,132 | 397 | 215 | Rejected for now; too aggressive before tiered port radius or richer context |
+| Stricter duration: `duration >= 120 min` | 637,961 | 2,361 | 1,387 | Useful later as severity, but not the first pass |
+| Stricter duration: `duration >= 360 min` | 637,961 | 1,065 | 1,030 | Too restrictive for initial detection; good candidate for high severity |
+| Exclude `at_anchor` / `moored` status | 637,961 | 2,372 | 1,286 | Rejected as hard filter; status is optional/noisy and should be context first |
+| Exclude `at_anchor` / `moored` / `undefined` | 637,961 | 2,190 | 1,188 | Rejected; drops too much evidence based on an unreliable field |
+
+**Why status is context, not a delete filter:**
+`Status` has missing/optional values and may not be consistently updated. Some
+status values reduce suspicion (`at_anchor`, `moored`), while others increase it
+(`under_way_using_engine`, `restricted_maneuverability`, `engaged_in_fishing`).
+The rule keeps the event and adds `primary_status_label` plus
+`suspicion_level` instead of silently dropping records.
+
+**Final rule output:**
+- Candidate pings: 637,961.
+- Candidate episodes: 5,780.
+- Final event episodes: 2,933.
+- Unique MMSIs flagged: 1,566.
+- Duration spread: min 60.0 minutes, median 206.2 minutes, max 1439.9 minutes.
+- Distance spread: min 30.0 km, median 52.7 km, max 342.5 km.
+- Suspicion levels: high 1,649; medium 1,000; low 284.
+
+**Output:**
+- Wrote `data/processed/loitering_events.csv`.
+- The generated CSV is ignored by git.
+- Source rule is `src/anomaly_rules/loitering.py`.
+
+**Interview story:**
+The first version produced too many row-level flags. I diagnosed that the unit
+of analysis was wrong: AIS pings are observations, but anomaly detection needs
+events. I tested stricter speed, distance, duration, and status filters. The
+chosen approach preserves evidence, collapses noisy rows into reviewable
+episodes, and uses status as explanatory context rather than as a brittle hard
+filter.
+
+Next: commit the loitering rule, then continue Phase 3 with another anomaly
+rule. Weather fusion is still planned, but it is more directly useful for the
+signal-gap / going-dark rule than for loitering.
+
+---
+
 ## 2026-07-08 - Phase 3: WPI port proximity fusion
 
 Implemented the first fusion checkpoint: nearest-port enrichment for every
