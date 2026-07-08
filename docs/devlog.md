@@ -1,3 +1,67 @@
+## 2026-07-08 - Phase 3: Identity inconsistency rule
+
+### Quick update
+
+Explored and implemented the identity inconsistency rule.
+
+This rule checks whether the same vessel ID (`MMSI`) broadcasts more than one
+vessel name. In this sample day, it found `0` identity inconsistency events,
+but the rule is now part of the pipeline for future AIS data.
+
+### Exploration
+
+Before writing the final rule, I profiled the identity fields:
+
+- `MMSI`
+- `VesselName`
+- `CallSign`
+- `IMO`
+- `IMO_FLAGGED`
+- `BaseDateTime`
+
+The main question was:
+
+> Does the same `MMSI` appear with more than one vessel name?
+
+Results:
+
+- Input fused rows: `7,284,239`
+- Unique MMSIs: `15,135`
+- Missing `VesselName` rows: `9,355`
+- MMSIs with more than one raw `VesselName`: `0`
+- MMSIs with more than one normalized `VesselName`: `0`
+
+### Rule decision
+
+The final rule normalizes `VesselName`, groups records by `MMSI`, and flags any
+MMSI with more than one normalized vessel name.
+
+Normalization matters because formatting differences like capitalization,
+spacing, or punctuation should not create fake conflicts.
+
+For this sample, the final rule output was:
+
+```text
+Identity inconsistency events: 0
+```
+
+That is still a valid result. A complete anomaly pipeline should run every rule,
+even when a specific dataset produces no events for that anomaly type.
+
+### Final takeaway
+
+Unlike loitering, where the main challenge was reducing too many noisy
+candidates, identity inconsistency was absent in this sample.
+
+The rule still adds coverage for another anomaly class:
+
+> same vessel ID, conflicting vessel name.
+
+Future AIS days may contain this behavior, and the pipeline is now ready to
+detect it.
+
+---
+
 ## 2026-07-08 - Phase 3: Loitering anomaly rule
 
 ### Quick update
