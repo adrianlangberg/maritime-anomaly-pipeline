@@ -1,3 +1,41 @@
+## 2026-07-08 - Phase 3: WPI port proximity fusion
+
+Implemented the first fusion checkpoint: nearest-port enrichment for every
+cleaned AIS ping.
+
+**Inputs:**
+- Cleaned AIS: `data/processed/AIS_2024_01_15_clean.csv`
+- World Port Index: `data/raw/wpi/UpdatedPub150.csv`
+
+**Implementation:**
+- Added `src/fusion/join_ports.py`.
+- Built a `sklearn.neighbors.BallTree` over 3,804 WPI port coordinates.
+- Used `metric="haversine"` with both WPI and AIS coordinates converted from
+  degrees to radians via `np.radians`.
+- Converted BallTree's returned radian distances to kilometers with
+  `distance_km = distance_rad * 6371`.
+- Added `nearest_port`, `port_distance_km`, and `near_port`.
+- Used a flat 30 km threshold for `near_port`; tiered harbor-size radii are
+  intentionally deferred.
+
+**Verification output:**
+- AIS row count: 7,284,239 rows, confirming the cleaned file was used.
+- WPI row count: 3,804 ports.
+- Ground-truth self-check: querying port `Maurer` at its own coordinates
+  returned 0.000000 km.
+- Distance spread: min 0.000 km, median 7.5 km, max 1428.9 km.
+- `near_port == True`: 5,952,324 rows (81.7%).
+
+**Output:**
+- Wrote `data/processed/AIS_2024_01_15_fused.csv`.
+- Output CSV remains untracked because generated CSVs are ignored by
+  `.gitignore`.
+
+Next: build anomaly rules against the fused output. Loitering is the best
+first rule because it directly depends on `near_port == False`.
+
+---
+
 ## 2026-07-01
 
 ### Verified Open-Meteo weather API for going-dark rule
