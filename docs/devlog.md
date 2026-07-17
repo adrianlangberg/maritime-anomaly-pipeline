@@ -1,3 +1,146 @@
+## 2026-07-16 - Phase 3: Speed inconsistency exploration
+
+### Quick update
+
+Today I explored the speed inconsistency rule.
+
+The goal was to find cases where the same vessel ID appears in two places too
+far apart for a real vessel to travel between AIS pings. In plain words, this
+rule is looking for vessel "teleporting" in the data.
+
+This is not based only on the vessel's reported speed. Instead, we calculate
+speed ourselves using position and time.
+
+### Initial run
+
+The profiling script loaded the fused AIS dataset:
+
+- `7,284,239` AIS rows
+- `15,135` unique MMSIs
+
+The script sorted each vessel's pings by `MMSI` and `BaseDateTime`, then
+compared each ping to the previous ping from the same vessel.
+
+For each pair, it calculated:
+
+- time gap between pings
+- distance between coordinates
+- implied speed in knots
+
+The first result showed that most vessel movement looked normal:
+
+- median time gap: `1.183 minutes`
+- median distance: `0.002 km`
+- median implied speed: `0.045 knots`
+- 99% of implied speeds were under about `18 knots`
+
+But the max implied speed was impossible: over `300,000 knots`.
+
+The worst examples came from bad vessel IDs like `MMSI = 0`, where the same ID
+appeared to jump between places like Hawaii and Portland, Maine in about one
+minute. That told me the first version was too noisy to become the final rule.
+
+### What changed
+
+To clean up the rule, I split the data into valid and invalid MMSIs.
+
+A valid-looking MMSI was defined as a 9-digit number between:
+
+```text
+100000000 and 999999999
+```
+
+This removed obvious placeholder IDs like:
+
+```text
+0
+short MMSIs
+too-long MMSIs
+```
+
+After that, I tested different time-gap and speed thresholds.
+
+The key test was:
+
+```text
+valid MMSI
+time gap >= 5 minutes
+implied speed > 100 knots
+```
+
+That produced:
+
+- `54` suspicious movement pairs
+- across `26` vessel IDs
+
+This means the pipeline went from millions of AIS pings down to a small set of
+reviewable impossible movements.
+
+### What the 54 movements mean
+
+The 54 results are not 54 vessels.
+
+They are 54 movement pairs, meaning one AIS ping compared to the previous AIS
+ping from the same MMSI.
+
+Each one says:
+
+```text
+This vessel ID was here,
+then later it was somewhere else,
+and the trip would require more than 100 knots.
+```
+
+That is physically unlikely for normal vessel movement, especially when at
+least 5 minutes passed between pings.
+
+The 54 movements happened across 26 MMSIs, which means some vessel IDs had more
+than one suspicious jump.
+
+### Candidate review
+
+The reviewable candidates were split by port context:
+
+- `33` happened away from port zones
+- `21` happened near a port
+
+This matters because near-port jumps may be caused by receiver noise or dense
+traffic areas, while open-water jumps are more suspicious.
+
+The reported AIS speeds did not explain the jumps:
+
+- median reported SOG max: `27 knots`
+- median implied speed: `489 knots`
+- max implied speed: `25,141 knots`
+
+So the vessel was usually not reporting an extreme speed. The impossible
+movement came from the position and timestamp combination.
+
+### Conclusion
+
+The exploration showed that a naive rule would be too noisy.
+
+A better first production rule is:
+
+```text
+same MMSI
+valid-looking MMSI
+time gap >= 5 minutes
+implied speed > 100 knots
+```
+
+This rule is simple, explainable, and produces a small reviewable result.
+
+The final rule writes one event per suspicious movement pair to:
+
+```text
+data/processed/speed_inconsistency_events.csv
+```
+
+The next step is to continue Phase 3 with the remaining anomaly rules.
+
+---
+
 ## 2026-07-08 - Phase 3: Identity inconsistency rule
 
 ### Quick update
