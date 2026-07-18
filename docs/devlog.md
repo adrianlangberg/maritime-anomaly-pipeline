@@ -1,3 +1,140 @@
+## 2026-07-18 - Phase 3: Unusual port behavior exploration
+
+Today I explored the unusual port behavior rule.
+
+What it means:
+
+> A vessel enters a port zone, does not behave like it actually arrived, and then leaves again.
+
+This does not automatically mean something is wrong. It means the vessel may
+have passed through a port zone, or had an unusual port-zone interaction worth
+reviewing.
+
+### What the rule uses
+
+- `MMSI` = vessel ID
+- `BaseDateTime` = timestamp for each AIS ping
+- `SOG` = speed over ground, in knots
+- `Status` = navigation status, like anchored or moored
+- `nearest_port` = closest World Port Index port
+- `port_distance_km` = distance to that closest port
+- `near_port` = whether the vessel is inside the 30 km port radius
+
+On top of that, I asked:
+
+- Did the vessel come from open water?
+- Did it enter a port zone?
+- Did it leave back to open water?
+- How long did it stay?
+- Did it slow down?
+- Did it report anchored or moored?
+- How deep inside the port radius did it get?
+
+The first results showed:
+
+- `12,909` valid MMSIs had at least one near-port ping
+- `30,965` near-port episodes
+- `1,903` episodes entered from open water
+- `679` bounded visits
+
+A bounded visit means:
+
+```text
+entered from open water
+then later left to open water
+```
+
+Those big numbers do not mean much by themselves. The important part was
+finding visits with no arrival behavior.
+
+I classified arrival behavior as:
+
+```text
+SOG <= 2 knots
+OR Status is anchored/moored
+```
+
+The first rule candidate was:
+
+```text
+bounded visit
+duration <= 60 minutes
+no arrival behavior
+```
+
+That produced `87` events.
+
+Some of those were only one-ping edge touches, so I added:
+
+```text
+ping_count >= 3
+```
+
+That gave a cleaner base rule:
+
+- `69` events
+- `49` MMSIs
+- `40` ports
+
+### Important discovery
+
+Most candidates were near the edge of the 30 km port radius.
+
+Median closest distance:
+
+```text
+28.66 km from port
+```
+
+So many are probably light port-zone touches, not strong port approaches.
+
+That is why I tested stricter depth thresholds:
+
+```text
+<= 30 km: 69 events
+<= 28 km: 25 events
+<= 25 km: 8 events
+<= 20 km: 5 events
+<= 15 km: 2 events
+```
+
+### Where we landed
+
+I did not choose one hard depth cutoff.
+
+Instead, the best shape is one rule with suspicion levels.
+
+Base rule:
+
+```text
+entered from open water
+left to open water
+duration <= 60 minutes
+ping_count >= 3
+no arrival behavior
+```
+
+Suspicion levels:
+
+```text
+high:
+  min_port_distance_km <= 25
+
+medium:
+  min_port_distance_km <= 28
+
+low:
+  min_port_distance_km > 28
+```
+
+That keeps all `69` events, but does not pretend they are all equally strong.
+
+In summary:
+
+> A vessel briefly entered a port zone from open water, left again, and never slowed down or reported anchored/moored. The deeper it entered the port zone, the more suspicious it becomes.
+
+---
+
 ## 2026-07-17 - Phase 3: Signal gap exploration
 
 Today I explored the signal gap rule: vessels that disappear from AIS and
