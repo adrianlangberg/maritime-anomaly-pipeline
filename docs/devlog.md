@@ -1,3 +1,45 @@
+## 2026-07-17 - Phase 3: Signal gap exploration
+
+Today I explored the signal gap rule: vessels that disappear from AIS and
+later come back.
+
+Most AIS gaps are short:
+
+- median gap: `1.183 minutes`
+- 99% of gaps: under `12.017 minutes`
+
+So I tested this rule:
+
+```text
+valid MMSI
+gap >= 360 minutes
+gap_touches_open_water == True
+```
+
+Plain English:
+
+> A vessel went quiet for at least 6 hours, and the gap was connected to open water.
+
+Result:
+
+- `311` signal gaps
+- `297` vessel IDs
+
+I also tested stricter versions, but Rule A stayed the best baseline. I decided
+not to require movement distance because a vessel can go quiet for hours
+without moving much.
+
+Final suspicion levels:
+
+```text
+high = both endpoints open water OR gap >= 720 minutes
+medium = one endpoint open water, one endpoint near port
+```
+
+Next step: turn Rule A into `signal_gaps.py`.
+
+---
+
 ## 2026-07-16 - Phase 3: Speed inconsistency exploration
 
 ### Quick update
