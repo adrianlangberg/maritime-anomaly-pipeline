@@ -1,3 +1,39 @@
+## 2026-07-22 - Phase 3 closeout: combined anomaly events table
+
+Quick update: Phase 3 now has the five anomaly rules connected into one final
+flagged-events table.
+
+After building the individual rules, the next step was to stop looking at them
+as separate CSVs and combine them into one clean output. I wrote
+`build_anomaly_events.py` to read all five rule outputs, standardize their
+columns, and write one master table called `anomaly_events.csv`.
+
+The combined table includes:
+
+- `loitering`
+- `identity_inconsistency`
+- `speed_inconsistency`
+- `signal_gap`
+- `unusual_port_behavior`
+
+The final output produced `3,367` anomaly events:
+
+- loitering: `2,933`
+- identity inconsistency: `0`
+- speed inconsistency: `54`
+- signal gaps: `311`
+- unusual port behavior: `69`
+
+The important part is that the total matched exactly with the five source
+files. That means the combine step did not accidentally lose or duplicate
+events.
+
+This closes the core Phase 3 anomaly pipeline. The project now has a full path
+from cleaned AIS data, to port fusion, to individual anomaly rules, to one
+combined flagged-events table.
+
+---
+
 ## 2026-07-18 - Phase 3: Unusual port behavior exploration
 
 Today I explored the unusual port behavior rule.
