@@ -1,3 +1,45 @@
+## 2026-07-24 - Phase 4: Local pipeline runner
+
+Quick update: I built `run_phase3.py`, the first real orchestration step of
+Phase 4.
+
+Before touching Airflow, I wanted a repeatable local pipeline that could run
+the completed Phase 3 work in the right order. This way, if future Airflow,
+Docker, or cloud work breaks, I can separate orchestration problems from the
+original five anomaly rules.
+
+The runner chains all nine Phase 3 scripts:
+
+```text
+clean_ais.py
+join_ports.py
+loitering.py
+identity_inconsistency.py
+speed_inconsistency.py
+signal_gaps.py
+add_weather_context.py
+unusual_port_behavior.py
+build_anomaly_events.py
+```
+
+The proof, not just a claim: after all nine steps finish, the runner re-checks
+the same numbers verified by hand throughout the project:
+
+- cleaned AIS rows: `7,284,239`
+- fused AIS rows: `7,284,239`
+- signal-gap events: `311`
+- total combined events: `3,367`
+
+If anything does not match, the runner fails clearly instead of silently
+printing a wrong number.
+
+The local runner passed end to end in `6.91` minutes.
+
+This is the bridge from manual scripts to Airflow: first prove the pipeline
+works locally, then turn that same order into a scheduled DAG.
+
+---
+
 ## 2026-07-23 - Signal gap weather context
 
 Quick update: I added weather context to the signal-gap events, but I did not
