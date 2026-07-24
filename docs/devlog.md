@@ -1,3 +1,54 @@
+## 2026-07-23 - Signal gap weather context
+
+Quick update: I added weather context to the signal-gap events, but I did not
+change the rule's suspicion levels yet.
+
+The goal was to check whether AIS signal gaps happened during bad weather.
+Instead of calling weather APIs for the full AIS file, I only enriched the 311
+signal-gap events. For each event, I used the moment the vessel disappeared
+from AIS:
+
+- `previous_time`
+- `previous_lat`
+- `previous_lon`
+
+I added two columns:
+
+- `windspeed_kmh`
+- `visibility_m`
+
+A key verification step was checking the API's own returned timestamp. This
+mattered because a previous weather test had accidentally returned current
+weather instead of Jan 15, 2024 weather. This time, the returned API hours
+matched the requested Jan 15, 2024 hours.
+
+The profile showed:
+
+- visibility under 1,000 m: `3` events
+- visibility under 5,000 m: `5` events
+- windspeed over 30 km/h: `34` events
+- windspeed over 40 km/h: `2` events
+- high wind plus low visibility: `0` events
+- normal wind and visibility: `272` events
+
+I also checked suspicion levels inside each weather bucket. The baseline across
+all 311 signal-gap events was 95.8% high. In the two low-visibility buckets,
+that dropped to 66.7% high and 80.0% high, but those buckets only had 3 and 5
+events. That is too little data to trust as a rule.
+
+So the conclusion is not "weather does not matter." The better conclusion is:
+weather may matter, but this one-day sample is too small to build an automatic
+suspicion rule from it.
+
+I also carried `windspeed_kmh` and `visibility_m` into the final
+`anomaly_events.csv` table. Those fields are filled for the 311 signal-gap rows
+and blank for the other anomaly types. The combined event total stayed `3,367`.
+
+For now, weather should explain the event conditions, not change `high`,
+`medium`, or `low`.
+
+---
+
 ## 2026-07-22 - Phase 3 closeout: combined anomaly events table
 
 Quick update: Phase 3 now has the five anomaly rules connected into one final
