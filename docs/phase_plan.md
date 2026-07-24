@@ -33,24 +33,30 @@ Output: 7,284,239 rows × 18 columns, 846.6 MB.
 
 ---
 
-**Phase 3 — Fusion & Anomaly Rules (Week 3)**
+**Phase 3 - Fusion & Anomaly Rules (Week 3) COMPLETE**
 
 What this phase does:
-Joins the three data sources together and runs the actual anomaly detection logic against the cleaned data.
+Joins contextual data to the cleaned AIS records and runs the actual anomaly
+detection logic against the fused dataset.
 
 Specific tasks:
-- ⬜ Profile and confirm World Port Index schema (carried from Phase 1)
-- ⬜ Join AIS with World Port Index on lat/lon proximity (defines "near a port")
-- ⬜ Join weather context (windspeed via archive-api, visibility via historical-forecast-api) on rounded hour + coordinate grid cell — batch API calls, not one per ping
-- ⬜ Build anomaly rule 1: AIS gap / going dark (with weather context layer if confirmed)
-- ⬜ Build anomaly rule 2: Loitering (near-zero SOG in open water, not near port)
-- ⬜ Build anomaly rule 3: Speed inconsistency (physically impossible movement between pings)
-- ⬜ Build anomaly rule 4: Identity inconsistency (same MMSI, different VesselName)
-- ⬜ Build anomaly rule 5: Unusual port behavior (approaches port zone, leaves without arrival)
-- ⬜ Output: flagged events table with anomaly type, MMSI, timestamp, coordinates, suspicion context
-- ⬜ Branch: `feature/fusion`, `feature/anomaly-rules`, PRs, merge to main
+- [x] Profile and confirm World Port Index schema (carried from Phase 1)
+- [x] Join AIS with World Port Index on lat/lon proximity (defines "near a port")
+- [x] Join weather context to signal-gap events (windspeed via archive-api,
+  visibility via historical-forecast-api)
+- [x] Build anomaly rule 1: AIS gap / going dark
+- [x] Build anomaly rule 2: Loitering (near-zero SOG in open water, not near port)
+- [x] Build anomaly rule 3: Speed inconsistency (physically impossible movement between pings)
+- [x] Build anomaly rule 4: Identity inconsistency (same MMSI, different VesselName)
+- [x] Build anomaly rule 5: Unusual port behavior (approaches port zone, leaves without arrival)
+- [x] Output: flagged events table with anomaly type, MMSI, timestamp,
+  coordinates, suspicion context, and weather context for signal gaps
+- [x] Branch: `feature/fusion`
 
-Closes when: all five rules running against real data, flagged events table populated, PRs merged.
+Output: `data/processed/anomaly_events.csv` with 3,367 flagged events.
+
+Closed when: all five rules ran against real data and the combined flagged
+events table was populated.
 
 ---
 

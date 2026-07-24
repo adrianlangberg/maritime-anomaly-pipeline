@@ -12,7 +12,7 @@ An ETL pipeline that detects anomalous vessel behavior from AIS (Automatic Ident
 - **Identity inconsistency** — conflicting vessel names for the same MMSI
 - **Unusual port behavior** — enters a port zone, leaves without a recorded arrival
 
-**Status:** Phases 0, 1, and 2 complete and merged to `main`. Phase 3 (fusion + anomaly rules) is the current work on branch `feature/fusion`. Cleaned AIS dataset is at `data/processed/AIS_2024_01_15_clean.csv` (7,284,239 rows, 18 columns, 846.6 MB).
+**Status:** Phases 0, 1, and 2 complete and merged to `main`. Phase 3 (fusion + anomaly rules) is complete on branch `feature/fusion`; Phase 4 orchestration is next. Cleaned AIS dataset is at `data/processed/AIS_2024_01_15_clean.csv` (7,284,239 rows, 18 columns, 846.6 MB).
 
 ## Tech Stack
 
@@ -43,6 +43,20 @@ python src/ingestion/inspect_wpi.py
 
 # Run the full Phase 2 validation chain → writes data/processed/AIS_2024_01_15_clean.csv
 python src/validation/clean_ais.py
+```
+
+Phase 3 run order:
+
+```bash
+python src/validation/clean_ais.py
+python src/fusion/join_ports.py
+python src/anomaly_rules/loitering.py
+python src/anomaly_rules/identity_inconsistency.py
+python src/anomaly_rules/speed_inconsistency.py
+python src/anomaly_rules/signal_gaps.py
+python src/fusion/add_weather_context.py
+python src/anomaly_rules/unusual_port_behavior.py
+python src/anomaly_rules/build_anomaly_events.py
 ```
 
 Exploration notebook (Phase 1):

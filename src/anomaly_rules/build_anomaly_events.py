@@ -37,6 +37,8 @@ COMMON_COLUMNS = [
     "nearest_port",
     "port_distance_km",
     "near_port",
+    "windspeed_kmh",
+    "visibility_m",
     "suspicion_level",
     "suspicion_context",
     "source_file",
@@ -71,6 +73,8 @@ def make_common_frame(source: pd.DataFrame, source_file: Path) -> pd.DataFrame:
     common["nearest_port"] = pd.NA
     common["port_distance_km"] = pd.NA
     common["near_port"] = pd.NA
+    common["windspeed_kmh"] = pd.NA
+    common["visibility_m"] = pd.NA
     common["suspicion_level"] = pd.NA
     common["suspicion_context"] = pd.NA
     common["source_file"] = source_file.name
@@ -175,6 +179,8 @@ def standardize_signal_gap(df: pd.DataFrame, source_file: Path) -> pd.DataFrame:
     common["nearest_port"] = df["nearest_port"]
     common["port_distance_km"] = df["port_distance_km"]
     common["near_port"] = df["near_port"]
+    common["windspeed_kmh"] = df["windspeed_kmh"]
+    common["visibility_m"] = df["visibility_m"]
     common["suspicion_level"] = df["suspicion_level"]
     common["suspicion_context"] = df["suspicion_context"]
     return common[COMMON_COLUMNS]
@@ -257,6 +263,10 @@ def build_anomaly_events(output_path: Path = OUT_PATH) -> pd.DataFrame:
         print("WARNING: combined row count does not match source file total.")
     else:
         print("Row count check passed.")
+
+    print("\nWeather context non-null counts:")
+    print(f"windspeed_kmh: {events['windspeed_kmh'].notna().sum():,}")
+    print(f"visibility_m:  {events['visibility_m'].notna().sum():,}")
 
     print("\nSuspicion levels:")
     print(events["suspicion_level"].value_counts(dropna=False).to_string())
