@@ -1,3 +1,32 @@
+## 2026-08-06 - Phase 4B: Airflow skeleton running in Docker
+
+Quick update: I got Apache Airflow 3.3.0 running locally in Docker. No DAG yet
+- this step was only about proving the engine boots before loading my pipeline
+into it.
+
+I installed WSL 2 and Docker Desktop, pulled the official Airflow 3.3.0
+docker-compose stack, made the folders it needs, and set AIRFLOW_UID=50000 in
+.env. Added logs/, plugins/, config/ to .gitignore as runtime junk - dags/ and
+docker-compose.yaml stay tracked.
+
+The proof, not just a claim:
+- airflow-init exited with code 0, admin user created.
+- All seven containers healthy: apiserver, scheduler, dag-processor, triggerer,
+  worker, postgres, redis.
+- Web UI loaded at localhost:8080, DAGs page empty as expected.
+
+Airflow ran well inside the pre-set 4-hour window, so it stays - no switch to
+Prefect. Committed the skeleton and pushed to feature/airflow-orchestration.
+
+Then I probed the worker container to find the next gap:
+- pandas, requests, sklearn already there -> no custom Dockerfile needed yet.
+- clean_ais.py -> "No such file or directory". Expected: my src/ and data/
+  aren't mounted into the container yet. That's what to build next.
+
+Next session: mount src/ (read-only) and data/ (read-write), recreate, and
+check the container can see the files without running anything. Then test one
+script inside the worker, then build the nine-task DAG.
+
 ## 2026-07-24 - Phase 4: Local pipeline runner
 
 Quick update: I built `run_phase3.py`, the first real orchestration step of
