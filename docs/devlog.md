@@ -1,3 +1,33 @@
+## Devlog — Chunk 2: Adding `join_ports`
+
+In chunk 2, I added the second task to my Airflow DAG called `join_ports`.
+
+I used another `BashOperator` because once again I already have an existing Python script that needs to be run by Airflow. The BashOperator gives Airflow the ability to run that script using a shell command.
+
+The command Airflow will run for this task is:
+
+`python /opt/airflow/src/fusion/join_ports.py`
+
+The important new line in this chunk is:
+
+`clean_ais >> join_ports`
+
+This means that `join_ports` can only start after `clean_ais` finishes successfully.
+
+If `clean_ais` fails, then `join_ports` will not run.
+
+This dependency is important because it helps make sure reliable data is transferred step by step through the pipeline.
+
+Before adding this dependency, I would have to manually run the two scripts one after the other.
+
+Now Airflow knows the correct order of the tasks and can enforce that order for me.
+
+This is the first time my DAG has more than one task, so it is starting to become a usable pipeline.
+
+My next step is to keep chaining the remaining tasks until all 9 pipeline steps are connected.
+
+---
+
 # Devlog: First Airflow DAG
 
 Today I am writing my first Airflow DAG for my maritime anomaly pipeline.

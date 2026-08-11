@@ -1,7 +1,7 @@
 """Airflow DAG for the maritime anomaly detection pipeline.
 
-This first learning version contains only the AIS cleaning task. Later versions
-will add the remaining pipeline steps after each dependency is understood.
+This learning version contains the first two pipeline tasks. Later versions
+will add the remaining steps after each dependency is understood.
 """
 
 # datetime gives Airflow a timezone-aware date for this DAG.
@@ -31,7 +31,7 @@ with DAG(
     # Tags make the DAG easier to find in the Airflow UI.
     tags=["maritime", "anomaly-detection"],
 ) as dag:
-    # This is the first and currently only task in the DAG.
+    # This is the first task in the DAG.
     clean_ais = BashOperator(
         # task_id is the task's unique name inside this DAG.
         task_id="clean_ais",
@@ -40,3 +40,13 @@ with DAG(
         # Use the mounted project root as the command's working directory.
         cwd="/opt/airflow",
     )
+
+    # This second task adds nearest-port information to the cleaned AIS data.
+    join_ports = BashOperator(
+        task_id="join_ports",
+        bash_command="python /opt/airflow/src/fusion/join_ports.py",
+        cwd="/opt/airflow",
+    )
+
+    # The >> dependency means join_ports can start only after clean_ais succeeds.
+    clean_ais >> join_ports
