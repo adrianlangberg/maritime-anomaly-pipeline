@@ -1,3 +1,81 @@
+# Devlog: First Airflow DAG
+
+Today I am writing my first Airflow DAG for my maritime anomaly pipeline.
+
+I called the DAG:
+
+`dag_id="maritime_anomaly_pipeline"`
+
+Before this, my `clean_ais.py` script was already working by itself. It takes around 7.28 million raw ocean/AIS pings and removes junk data such as missing positions, impossible values, and duplicates.
+
+The raw dataset contains 7,284,415 rows.
+
+After cleaning, the output contains 7,284,239 rows, meaning 176 unnecessary rows were removed.
+
+That final row count is important because it gives me a number I can use later to check whether data is accidentally being lost somewhere else in the pipeline.
+
+For this first Airflow version, I only added the cleaning step.
+
+I am using a `BashOperator` because my pipeline scripts already exist and work outside of Airflow. The BashOperator gives Airflow a way to execute those existing scripts using shell commands.
+
+The DAG is basically the conductor, and the BashOperator is the bridge that lets the conductor cue work I already built.
+
+The command Airflow will currently run is:
+
+`python /opt/airflow/src/validation/clean_ais.py`
+
+I set `schedule=None` because I do not want this pipeline to run automatically yet.
+
+My scripts currently have a date hardcoded, and there is no new incoming data. Creating a daily schedule would be fake automation because it would look like the pipeline processes new daily data when it would actually keep reprocessing the same frozen dataset.
+
+I set `max_active_runs=1` because I do not want multiple copies of the DAG running at the same time.
+
+My pipeline writes data to shared files, so overlapping runs could potentially interfere with each other or corrupt outputs.
+
+I also learned what `start_date` means.
+
+`start_date` does not pass January 15, 2024 into my Python scripts and it does not decide which AIS date gets processed.
+
+It is scheduling metadata used by Airflow. My cleaning script still controls its own input date internally.
+
+I verified that Airflow successfully recognized the DAG by checking for import errors.
+
+The result showed:
+
+`Import errors: []`
+
+This means Airflow found zero import errors and successfully registered the DAG.
+
+The DAG itself has not actually executed yet.
+
+It currently has no automatic schedule, and I intentionally have not manually triggered the first run yet because I want to watch the tasks and logs when I run it for the first time.
+
+Git currently shows:
+
+`?? dags/maritime_anomaly_pipeline.py`
+
+This means the new DAG file is currently untracked. I have created it, but I have not staged or committed it yet.
+
+This is phase 1 of building the DAG.
+
+My next step is to add `join_ports.py`.
+
+That script figures out which port each vessel is near by joining the cleaned ship data with port data.
+
+I will also add my first Airflow dependency:
+
+`clean_ais >> join_ports`
+
+A dependency is basically an arrow that tells Airflow:
+
+“this task must finish successfully before the next task is allowed to start.”
+
+So `join_ports` will not be allowed to start until `clean_ais` finishes successfully.
+
+I am going to keep building the DAG one step at a time and devlog each step.
+
+---
+
 ## 2026-08-06 - Phase 4B: Airflow skeleton running in Docker
 
 Quick update: I got Apache Airflow 3.3.0 running locally in Docker. No DAG yet
