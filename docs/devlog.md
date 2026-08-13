@@ -1,3 +1,57 @@
+Devlog — Chunk 3: Adding the Anomaly Detection Rules
+
+In chunk 2, my DAG only had two tasks:
+clean_ais >> join_ports
+
+In chunk 3, I expanded the DAG by adding 6 more tasks. These new tasks are:
+
+detect_loitering
+detect_identity_inconsistency
+detect_speed_inconsistency
+detect_signal_gaps
+add_weather_context
+detect_unusual_port_behavior
+
+I decided to use a detect_ prefix because it groups the detector tasks visually in the Airflow UI. For example:
+
+Setup / Fusion: clean_ais, join_ports
+Detectors: detect_loitering, detect_identity_inconsistency, detect_speed_inconsistency, detect_signal_gaps, detect_unusual_port_behavior
+Enrichment: add_weather_context
+
+Instead of calling a task just loitering, I use detect_loitering. This helps me and other users understand more quickly what the task is actually doing.
+
+Each anomaly task still uses a BashOperator because I already wrote and tested the rules as standalone Python programs. Airflow does not need to rewrite the logic. It only needs a way to launch those existing scripts. For example, the detect_loitering task runs:
+python /opt/airflow/src/anomaly_rules/loitering.py
+
+The five anomaly-detection rules are included in this chunk because I already understand the basic dependency pattern. Adding every detector in a separate learning chunk would now be repetitive and inefficient. Those five rules are:
+
+Loitering
+Identity inconsistency
+Speed inconsistency
+Signal gaps
+Unusual port behavior
+
+All five rules use the fused AIS dataset produced after join_ports. The fused dataset is important because it contains the vessel position data plus information about the nearest port.
+
+One thing I learned in this chunk is that not every arrow in the DAG means that one task needs the previous task's output. For example, detect_loitering and detect_identity_inconsistency both read the same fused CSV, so the dependency between them is not a mandatory data dependency. It is mainly about sequencing and execution order. They are still running sequentially because I chose run_phase3.py as the authoritative order, and running them one at a time avoids multiple detector tasks loading the large fused CSV at the same time.
+
+The dependency chain now looks like this:
+clean_ais >> join_ports >> detect_loitering >> detect_identity_inconsistency >> detect_speed_inconsistency >> detect_signal_gaps >> add_weather_context >> detect_unusual_port_behavior
+
+This means Airflow will only continue to the next task if the previous task finishes successfully.
+
+There is one dependency that is especially important:
+detect_signal_gaps >> add_weather_context
+This is a true data dependency because add_weather_context reads and rewrites the signal_gap_events.csv file that detect_signal_gaps produces. It enriches those exact signal-gap events with weather data. If detect_signal_gaps does not successfully create signal_gap_events.csv, then add_weather_context has no file to read and would fail.
+
+Compared with chunk 2, the main difference is that my DAG is no longer just proving that two scripts can run in order. It is now a full sequence of scripts that models a real multi-step anomaly-detection workflow.
+
+The pipeline currently contains 8 Airflow tasks in total. The final combine task and verification task are not included yet because I still need to add build_anomaly_events.py as an Airflow task and then add a verification task for the final outputs.
+
+My next step is to add those final tasks and complete the DAG.
+
+---
+
 ## Devlog — Chunk 2: Adding `join_ports`
 
 In chunk 2, I added the second task to my Airflow DAG called `join_ports`.

@@ -234,3 +234,4 @@ venv/
 /logs/
 /plugins/
 /config/
+/.claude/

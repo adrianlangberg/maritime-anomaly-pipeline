@@ -1,7 +1,7 @@
 """Airflow DAG for the maritime anomaly detection pipeline.
 
-This learning version contains the first two pipeline tasks. Later versions
-will add the remaining steps after each dependency is understood.
+This learning version contains the first eight pipeline tasks. The combined
+event table and final verification will be added in the next chunk.
 """
 
 # datetime gives Airflow a timezone-aware date for this DAG.
@@ -48,5 +48,61 @@ with DAG(
         cwd="/opt/airflow",
     )
 
-    # The >> dependency means join_ports can start only after clean_ais succeeds.
-    clean_ais >> join_ports
+    # Detect loitering episodes from the fused AIS and port-proximity data.
+    detect_loitering = BashOperator(
+        task_id="detect_loitering",
+        bash_command="python /opt/airflow/src/anomaly_rules/loitering.py",
+        cwd="/opt/airflow",
+    )
+
+    # Detect MMSIs that broadcast conflicting vessel identities.
+    detect_identity_inconsistency = BashOperator(
+        task_id="detect_identity_inconsistency",
+        bash_command=(
+            "python /opt/airflow/src/anomaly_rules/identity_inconsistency.py"
+        ),
+        cwd="/opt/airflow",
+    )
+
+    # Detect physically implausible movement between consecutive AIS positions.
+    detect_speed_inconsistency = BashOperator(
+        task_id="detect_speed_inconsistency",
+        bash_command="python /opt/airflow/src/anomaly_rules/speed_inconsistency.py",
+        cwd="/opt/airflow",
+    )
+
+    # Detect vessels that disappear from AIS and later return.
+    detect_signal_gaps = BashOperator(
+        task_id="detect_signal_gaps",
+        bash_command="python /opt/airflow/src/anomaly_rules/signal_gaps.py",
+        cwd="/opt/airflow",
+    )
+
+    # Add weather observations to the signal-gap events produced above.
+    add_weather_context = BashOperator(
+        task_id="add_weather_context",
+        bash_command="python /opt/airflow/src/fusion/add_weather_context.py",
+        cwd="/opt/airflow",
+    )
+
+    # Detect unusual short visits through port zones.
+    detect_unusual_port_behavior = BashOperator(
+        task_id="detect_unusual_port_behavior",
+        bash_command=(
+            "python /opt/airflow/src/anomaly_rules/unusual_port_behavior.py"
+        ),
+        cwd="/opt/airflow",
+    )
+
+    # Each >> arrow means the task on the right waits for the task on the left.
+    # This order exactly matches PIPELINE_STEPS in src/pipeline/run_phase3.py.
+    (
+        clean_ais
+        >> join_ports
+        >> detect_loitering
+        >> detect_identity_inconsistency
+        >> detect_speed_inconsistency
+        >> detect_signal_gaps
+        >> add_weather_context
+        >> detect_unusual_port_behavior
+    )
