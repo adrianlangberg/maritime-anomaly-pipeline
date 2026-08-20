@@ -1,3 +1,101 @@
+# Devlog — Chunk 4: Completing and Verifying the DAG
+
+In chunk 3, my Airflow DAG ended with `detect_unusual_port_behavior` and contained a total of 8 tasks.
+
+In chunk 4, I added the final two tasks:
+
+1. `build_anomaly_events`
+2. `verify_outputs`
+
+The first new task, `build_anomaly_events`, runs my existing script called `build_anomaly_events.py`.
+
+Its purpose is to combine the outputs from the five anomaly-detection rules into one common anomaly-events table.
+
+This is important because before this step, my five anomaly detectors produced separate rule-specific event files. `build_anomaly_events` brings those results together into one final dataset.
+
+After `build_anomaly_events` finishes successfully, it is time to verify the outputs.
+
+This became processing task number 9 in the pipeline.
+
+---
+
+The second new task is `verify_outputs`.
+
+At first, I looked for an existing `verify_outputs.py` script, but there wasn't one.
+
+However, I already had verification logic inside `run_phase3.py`.
+
+The two existing verification functions are:
+
+- `verify_output_rows()`
+- `verify_weather_context()`
+
+I did not want to copy this verification logic or duplicate the expected row counts because then I would have two places containing the same rules. If one was changed and the other wasn't, they could disagree and create bugs.
+
+Instead, I created a small wrapper script called `verify_outputs.py`.
+
+The wrapper imports those two functions from `run_phase3.py` and runs them both. This gives Airflow a standalone command it can execute without rewriting the verification logic.
+
+I learned that a wrapper script is basically a small file that borrows and runs code that already exists somewhere else. Instead of rewriting the logic, it acts as a thin layer that gives existing functions another way to be executed.
+
+In this case, it gives Airflow something it can run as a standalone command.
+
+The Airflow task runs:
+
+```text
+python /opt/airflow/src/pipeline/verify_outputs.py
+```
+
+---
+
+The verification task is different from the first nine tasks because it does not create, alter, or ingest new data. Its job is to check the outputs that the pipeline already created.
+
+The first nine tasks process or transform data, while `verify_outputs` checks the finished outputs against known expected row counts and verifies the weather-context coverage.
+
+If one of the verification functions detects a bad result, it raises a `RuntimeError`.
+
+Because that error is not caught, Python stops the script and exits with a non-zero exit code.
+
+Airflow then sees that non-zero exit code and marks the `verify_outputs` task as failed, which causes the DAG run to fail.
+
+This means a pipeline is not considered successful just because all of the processing scripts finished running.
+
+The final outputs also have to pass the quality checks I defined.
+
+---
+
+My completed dependency chain is now:
+
+`clean_ais >> join_ports >> detect_loitering >> detect_identity_inconsistency >> detect_speed_inconsistency >> detect_signal_gaps >> add_weather_context >> detect_unusual_port_behavior >> build_anomaly_events >> verify_outputs`
+
+The DAG now contains 10 total tasks.
+
+The first 9 are processing tasks matching the order in `run_phase3.py`.
+
+The 10th and final task is `verify_outputs`, which acts as a quality gate after the processing is complete.
+
+---
+
+I validated the DAG by running a Python syntax check, an Airflow import check, and checking the parsed task relationships.
+
+The results showed:
+
+- Python syntax: passed
+- Airflow import errors: `[]`
+- Total tasks: 10
+
+Airflow also correctly parsed `build_anomaly_events` as being downstream of `detect_unusual_port_behavior` and `verify_outputs` as being downstream of `build_anomaly_events`.
+
+However, this does **not** mean that the full data pipeline has successfully run yet.
+
+It only proves that the Python is valid, Airflow can understand the DAG, all 10 tasks exist, and the dependencies are connected correctly.
+
+Nothing has been triggered yet, so my next major step is to manually trigger the complete DAG and watch each task run in the Airflow UI.
+
+During that first full run, I will watch the task statuses and logs, confirm that every task succeeds, and make sure the final `verify_outputs` quality checks pass.
+
+---
+
 Devlog — Chunk 3: Adding the Anomaly Detection Rules
 
 In chunk 2, my DAG only had two tasks:

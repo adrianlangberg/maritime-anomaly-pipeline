@@ -1,7 +1,7 @@
 """Airflow DAG for the maritime anomaly detection pipeline.
 
-This learning version contains the first eight pipeline tasks. The combined
-event table and final verification will be added in the next chunk.
+This learning version contains the complete ten-task pipeline: nine processing
+steps followed by final output verification.
 """
 
 # datetime gives Airflow a timezone-aware date for this DAG.
@@ -94,8 +94,24 @@ with DAG(
         cwd="/opt/airflow",
     )
 
+    # Combine the five rule-specific event files into one common event table.
+    build_anomaly_events = BashOperator(
+        task_id="build_anomaly_events",
+        bash_command=(
+            "python /opt/airflow/src/anomaly_rules/build_anomaly_events.py"
+        ),
+        cwd="/opt/airflow",
+    )
+
+    # Run the shared golden-count and weather checks after all outputs exist.
+    verify_outputs = BashOperator(
+        task_id="verify_outputs",
+        bash_command="python /opt/airflow/src/pipeline/verify_outputs.py",
+        cwd="/opt/airflow",
+    )
+
     # Each >> arrow means the task on the right waits for the task on the left.
-    # This order exactly matches PIPELINE_STEPS in src/pipeline/run_phase3.py.
+    # The nine processing tasks match PIPELINE_STEPS; verification is appended last.
     (
         clean_ais
         >> join_ports
@@ -105,4 +121,7 @@ with DAG(
         >> detect_signal_gaps
         >> add_weather_context
         >> detect_unusual_port_behavior
+        >> build_anomaly_events
+        # Verification runs last and fails the DAG run if any golden count is wrong.
+        >> verify_outputs
     )
