@@ -1,6 +1,12 @@
+import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from sklearn.neighbors import BallTree
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from validation.output_validation import EXPECTED_CLEAN_ROWS, validate_clean_ais_csv
 
 # Earth's mean radius, used to convert haversine's radian output to kilometers.
 EARTH_RADIUS_KM = 6_371
@@ -31,8 +37,11 @@ def join_ports(
     # 1. Load data
     # ------------------------------------------------------------------
     print("Loading AIS data...")
+    # Validate the persisted boundary before loading millions of rows or doing
+    # any port calculations. Corrupt input now fails with a specific message.
+    validate_clean_ais_csv(ais_path)
     ais = pd.read_csv(ais_path)
-    print(f"  AIS row count: {len(ais):,}  (expected 7,284,239)")
+    print(f"  AIS row count: {len(ais):,}  (expected {EXPECTED_CLEAN_ROWS:,})")
 
     print("Loading World Port Index...")
     # Only pull the three columns we actually need, which keeps memory low.
@@ -89,7 +98,7 @@ def join_ports(
     print("\n--- VERIFICATION ---")
 
     # Check 1: row count must equal the cleaned file's known row count.
-    row_ok = len(ais) == 7_284_239
+    row_ok = len(ais) == EXPECTED_CLEAN_ROWS
     status = "OK" if row_ok else "MISMATCH - wrong input file?"
     print(f"1. Row count: {len(ais):,}  [{status}]")
 
