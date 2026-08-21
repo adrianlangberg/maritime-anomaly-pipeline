@@ -1,3 +1,176 @@
+# Devlog — First Full DAG Run: Found a Data-Corruption Bug
+
+I triggered my first full pipeline run in Airflow.
+
+The result: `clean_ais` succeeded, but `join_ports` failed. Because of that failure, all downstream tasks were blocked and showed **“upstream failed.”**
+
+This is actually the DAG working correctly. One task failed, so Airflow stopped the pipeline instead of allowing bad data to continue through the remaining steps.
+
+## The Failure
+
+`join_ports` crashed when `np.radians()` encountered:
+
+`WDG8602`
+
+This should have been a numeric latitude, but `WDG8602` is actually a ship's call sign. Because the record became corrupted, the call sign shifted into the latitude column, and `join_ports` tried to perform a mathematical calculation on text.
+
+I investigated the root cause instead of only fixing the crash and found two important things.
+
+### 1. The row count was wrong
+
+`join_ports` read:
+
+**7,284,231 rows**
+
+My expected golden row count was:
+
+**7,284,239 rows**
+
+That meant the saved file was **8 rows short**.
+
+### 2. The `clean_ais` logic was actually correct
+
+Inside memory, `clean_ais` produced exactly:
+
+**7,284,239 rows**
+
+So my cleaning rules had not accidentally removed eight additional records.
+
+The problem happened while the cleaned DataFrame was being written to disk.
+
+The investigation found a block of NUL bytes inside the roughly 880 MB cleaned CSV. That corrupted section replaced data belonging to nine vessel records. Eight records were completely lost, while the ninth was partially damaged.
+
+This explains the exact difference:
+
+**9 expected records → 1 malformed record = 8 missing rows**
+
+The damaged ninth record also caused its columns to shift. A ship's call sign, `WDG8602`, ended up inside the `LAT` column, which is what eventually caused `join_ports` to fail.
+
+The evidence points to corruption occurring while the large CSV was being written through the Docker Desktop bind mount onto the Windows filesystem. I cannot prove whether Docker Desktop, Windows, or another lower-level I/O issue specifically caused it, so I should not call this a pandas or Python logic bug.
+
+## Key Lesson
+
+A successful Python task does not automatically mean the file it produced is valid.
+
+`clean_ais` had the correct data in memory and exited successfully, but the persisted CSV was corrupted afterward.
+
+The tempting fixes would have been things like:
+
+`low_memory=False`
+
+or converting invalid coordinate values to `NaN`.
+
+Those changes might have hidden the error, but they would not have restored the eight missing records or repaired the corrupted row.
+
+That would create something worse: a pipeline that finishes successfully while silently producing incorrect data.
+
+I would rather have the pipeline fail loudly than continue with corrupted data.
+
+## My Fix
+
+Instead of hiding the problem, I am going to add validation at the boundary between `clean_ais` and `join_ports`.
+
+`clean_ais` will write its output, reopen it, and verify that the persisted file is actually valid. The checks will include:
+
+* Expected row count
+* Correct schema
+* No NUL-byte corruption
+* Numeric latitude and longitude values
+
+If those checks fail, `clean_ais` should fail instead of reporting success and passing a corrupted file downstream.
+
+I will also harden `join_ports`.
+
+Before doing any port calculations, it should check that the expected row count is present and that the coordinate columns contain valid numeric values. If not, it should stop immediately and report exactly what is wrong.
+
+This should turn a confusing downstream error like:
+
+`np.radians('WDG8602')`
+
+into a much clearer failure such as:
+
+`Input validation failed: non-numeric LAT value detected`
+
+## Next Step
+
+My next step is to add these safety checks, regenerate the cleaned CSV, and rerun the pipeline.
+
+Then I need to confirm that the cleaned file survives the write correctly before `join_ports` starts, and finally rerun the full DAG to see whether all 10 tasks complete successfully.
+
+
+## Suggested Fix
+
+My next step is to delete the broken file, have `clean_ais` build a fresh one, and then check if the new file is also corrupted.
+
+This creates a worker container, runs the cleaning script, and verifies the row count, NUL bytes, and whether the `LAT` and `LON` data types are numeric.
+
+This will confirm whether the corruption was a random fluke or something repeatable.
+
+Then I want to add two safety nets:
+
+**A:** After the file is saved, immediately reopen it and check that it is not broken.
+
+**B:** Before doing any math in `join_ports`, check that the input is valid. If it is not, stop with a clear error.
+
+Why?
+
+Right now, `join_ports` blindly trusts its input and crashes about six minutes later with a weird `np.radians` error.
+
+With these checks, it can fail immediately with a message that actually explains what is wrong.
+
+## The Guardrail
+
+These are not real fixes:
+
+```python
+pd.read_csv(..., low_memory=False)        # ❌ hides the crash
+pd.to_numeric(..., errors="coerce")       # ❌ turns bad data into NaN
+```
+
+We want to fix the problem, not make the error quiet.
+
+Those two lines could make the crash disappear, but the eight rows would still be missing and the data would still be wrong. The pipeline could keep running while silently producing incorrect results.
+
+We are explicitly avoiding that lazy fix.
+
+That is the whole point of the guardrails.
+
+## In One Picture
+
+```text
+JOB 1:
+
+Delete bad file
+    ↓
+Rerun clean_ais
+    ↓
+Is the new file clean or corrupt?
+    ↓
+Was it a fluke or is it repeatable?
+```
+
+```text
+JOB 2:
+
+Add self-checks so the pipeline catches corruption
+
+clean_ais
+    ↓
+validates AFTER writing
+    ↓
+fails if the file is broken
+
+join_ports
+    ↓
+validates BEFORE doing math
+    ↓
+stops immediately if the input is bad
+```
+
+**BANNED:** any fix that hides the error instead of solving it.
+
+---
+
 # Devlog — Chunk 4: Completing and Verifying the DAG
 
 In chunk 3, my Airflow DAG ended with `detect_unusual_port_behavior` and contained a total of 8 tasks.
