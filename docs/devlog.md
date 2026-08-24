@@ -1,3 +1,186 @@
+# Devlog — Fixing the Signal-Gap Memory Failure
+
+During the full DAG run, `detect_signal_gaps` failed with:
+
+`return code -9`
+
+This meant the task ran out of RAM and the operating system killed it.
+
+The worker used about **6.1 GiB**, while Docker only had about **7.59 GiB** available for the whole Airflow setup.
+
+The signal-gap logic itself was correct. The problem was that the old code tried to hold too much data in memory at once.
+
+It loaded all **7.28 million rows** into pandas, sorted them, created previous-record copies, and then created even more copies for the calculations.
+
+Eventually, Docker ran out of available memory.
+
+## The Fix
+
+The easy workaround would have been to give Docker more RAM.
+
+I did not want to do that because the same problem could come back as the project gets bigger.
+
+Instead, I changed the script to process smaller amounts of data at a time.
+
+The new version:
+
+- Reads **250,000 rows at a time**
+- Groups vessel records into **64 temporary partitions** using `MMSI`
+- Makes sure all records for the same vessel end up together
+- Processes one partition at a time
+- Filters unnecessary rows before doing the expensive distance calculations
+
+The main change can be summarized like this:
+
+```python
+# Read bounded chunks and keep every vessel's records in one partition.
+for chunk in pd.read_csv(fused_path, chunksize=250_000):
+    partition_ids = pd.util.hash_pandas_object(
+        chunk["MMSI"], index=False
+    ) % 64
+    write_rows_to_partitions(chunk, partition_ids)
+
+# Load and process only one MMSI-complete partition at a time.
+for partition_path in partition_paths:
+    df = pd.read_csv(partition_path)
+    df = df.sort_values(["MMSI", "BaseDateTime"])
+    previous_time = df.groupby("MMSI")["BaseDateTime"].shift()
+    events.append(filter_signal_gaps(df, previous_time))
+```
+
+This keeps the memory usage much lower.
+
+After all the smaller partitions are processed, the signal-gap events are combined into one final output.
+
+The script also checks that exactly **311 signal-gap events** were produced before replacing the final file.
+
+The new version finished successfully with **exit code 0** and produced:
+
+- **284** open-to-open events
+- **20** open-to-port events
+- **7** port-to-open events
+- **311 total events**
+
+## Main Lesson
+
+The code was logically correct, but it did not scale well in memory.
+
+Instead of solving the problem by adding more RAM, I changed the way the data is processed so the entire 7.28-million-row dataset does not need to be in memory at the same time.
+
+---
+
+# Devlog Update — Root Cause, Fix Plan, and What Actually Changed
+
+The actual problem was **file corruption during the CSV write**, not a bug in my cleaning logic or in `join_ports`.
+
+`clean_ais` correctly produced **7,284,239 rows in memory**, but while the roughly 880 MB cleaned CSV was being written through Docker to the Windows filesystem, part of the file was corrupted.
+
+A block of **1,058 NUL bytes** overwrote part of the CSV, destroying 8 records and mangling a 9th. That damaged row shifted the ship call sign `WDG8602` into the `LAT` column.
+
+`join_ports` then received that corrupted file and eventually crashed when `np.radians()` tried to perform math on `WDG8602`.
+
+So the real chain was:
+
+```text
+clean_ais logic ✅
+        ↓
+CSV write becomes corrupted ❌
+        ↓
+join_ports receives bad input
+        ↓
+LAT contains "WDG8602"
+        ↓
+np.radians() fails
+```
+
+The exact low-level cause of the corruption is still not proven. It could involve Docker Desktop, Windows file I/O, or another storage-layer issue. The corruption did not repeat when the file was regenerated, so I cannot call it a repeatable Docker bug.
+
+## Expected Fix vs. Actual Fix
+
+My original fix plan was very close to what was eventually implemented.
+
+I planned to:
+
+- Delete the corrupted file and regenerate it
+- Check the new file's row count, NUL bytes, and numeric LAT/LON values
+- Add validation after `clean_ais` writes
+- Add validation before `join_ports` does math
+- Avoid hiding the problem with `low_memory=False` or coercing bad data to `NaN`
+- Fail loudly with a clear error if the data is invalid
+
+That overall approach was correct.
+
+The final implementation made four improvements:
+
+**1. Preserve instead of delete**
+
+Instead of deleting the corrupted file, I preserved it as evidence.
+
+This turned out to be useful because I could use the known-bad file to prove that the new validator actually catches the original corruption.
+
+**2. One clean rerun does not prove it was a fluke**
+
+I originally thought rerunning `clean_ais` would tell me whether the corruption was a fluke or repeatable.
+
+The regenerated file came out completely clean:
+
+- `7,284,239` rows
+- `0` NUL bytes
+- Valid LAT/LON
+- Correct schema
+
+That proves the corruption did not repeat **this time**, but it does not prove the storage issue can never happen again.
+
+**3. Safer write process**
+
+Instead of writing directly to the final CSV and checking afterward, `clean_ais` now:
+
+```text
+writes candidate file
+        ↓
+reopens and validates it
+        ↓
+GOOD → atomically replace final file
+BAD  → fail and preserve candidate
+```
+
+This is safer because a corrupt new write cannot automatically overwrite an existing good file.
+
+**4. One shared validator**
+
+Instead of writing separate validation logic inside `clean_ais` and `join_ports`, both use the same shared validator.
+
+This keeps the rules consistent and avoids having two copies of the same checks that could drift apart later.
+
+## Main Learning
+
+The biggest lesson is that **a task finishing successfully does not guarantee that the file it wrote is valid**.
+
+My DataFrame was correct in memory and `clean_ais` exited successfully, but the persisted CSV was still damaged.
+
+That means validation should happen at the boundaries between pipeline tasks.
+
+Going forward:
+
+- `clean_ais` validates its output **after writing**
+- `join_ports` validates its input **before processing**
+- corrupted data fails loudly instead of being silently ignored or converted
+
+I also learned that fixes like:
+
+```python
+pd.read_csv(..., low_memory=False)
+pd.to_numeric(..., errors="coerce")
+```
+
+would only make the crash quieter. They would not restore the missing 8 records or repair the malformed row.
+
+The goal is not just to make the pipeline run.
+
+The goal is to make sure the pipeline only continues when the data itself is trustworthy.
+
+---
+
 # Devlog — First Full DAG Run: Found a Data-Corruption Bug
 
 I triggered my first full pipeline run in Airflow.

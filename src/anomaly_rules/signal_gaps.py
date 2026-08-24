@@ -6,7 +6,10 @@ come back. A signal gap does not prove suspicious activity by itself, but a
 long gap connected to open water is strong enough to become a reviewable event.
 """
 
+import os
 from pathlib import Path
+import tempfile
+from uuid import uuid4
 
 import numpy as np
 import pandas as pd
@@ -16,10 +19,13 @@ FUSED_PATH = Path(__file__).parent.parent.parent / "data" / "processed" / "AIS_2
 OUT_PATH = Path(__file__).parent.parent.parent / "data" / "processed" / "signal_gap_events.csv"
 
 EXPECTED_FUSED_ROWS = 7_284_239
+EXPECTED_SIGNAL_GAP_EVENTS = 311
 EARTH_RADIUS_KM = 6371.0
 
 DEFAULT_MIN_GAP_MINUTES = 360.0
 DEFAULT_HIGH_GAP_MINUTES = 720.0
+DEFAULT_CHUNK_ROWS = 250_000
+DEFAULT_PARTITION_COUNT = 64
 
 
 def haversine_km(lat1, lon1, lat2, lon2):
@@ -82,11 +88,154 @@ def assign_suspicion_level(
     return "medium"
 
 
+def partition_fused_data(
+    fused_path: Path,
+    partition_dir: Path,
+    columns: list[str],
+    chunk_rows: int,
+    partition_count: int,
+) -> tuple[list[Path], int, int, int]:
+    """Split the fused CSV into bounded files while keeping each MMSI together."""
+    partition_paths = [
+        partition_dir / f"partition_{number:03d}.csv"
+        for number in range(partition_count)
+    ]
+    partitions_with_headers: set[int] = set()
+    total_rows = 0
+    valid_mmsi_rows = 0
+    unique_mmsis: set[str] = set()
+
+    print(
+        f"Partitioning fused AIS data in chunks of {chunk_rows:,} rows "
+        f"across {partition_count} temporary files..."
+    )
+    for chunk_number, chunk in enumerate(
+        pd.read_csv(
+            fused_path,
+            usecols=columns,
+            chunksize=chunk_rows,
+            dtype={"MMSI": "string"},
+        ),
+        start=1,
+    ):
+        total_rows += len(chunk)
+        valid_mmsi_rows += int(is_valid_mmsi(chunk["MMSI"]).sum())
+        unique_mmsis.update(chunk["MMSI"].dropna().unique().tolist())
+
+        # pandas' hash is deterministic for the same MMSI string. Modulo sends
+        # every row for one vessel to the same file, even across input chunks.
+        partition_numbers = (
+            pd.util.hash_pandas_object(chunk["MMSI"], index=False)
+            .mod(partition_count)
+            .astype("int64")
+        )
+
+        for partition_number in partition_numbers.unique():
+            number = int(partition_number)
+            partition_rows = chunk.loc[partition_numbers == number]
+            partition_rows.to_csv(
+                partition_paths[number],
+                mode="a",
+                header=number not in partitions_with_headers,
+                index=False,
+            )
+            partitions_with_headers.add(number)
+
+        print(f"  Partitioned chunk {chunk_number}: {total_rows:,} total rows")
+
+    populated_paths = [
+        path
+        for number, path in enumerate(partition_paths)
+        if number in partitions_with_headers
+    ]
+    return populated_paths, total_rows, len(unique_mmsis), valid_mmsi_rows
+
+
+def process_partition(
+    partition_path: Path,
+    min_gap_minutes: float,
+    high_gap_minutes: float,
+) -> tuple[pd.DataFrame, int]:
+    """Detect events in one MMSI-complete partition."""
+    df = pd.read_csv(partition_path, dtype={"MMSI": "string"})
+    df["BaseDateTime"] = pd.to_datetime(df["BaseDateTime"])
+    df = df.sort_values(["MMSI", "BaseDateTime"]).reset_index(drop=True)
+    grouped = df.groupby("MMSI", sort=False)
+
+    # Keep only the four full-partition shifted Series needed to identify an
+    # event. Other previous-row values are selected only after filtering.
+    previous_time = grouped["BaseDateTime"].shift()
+    previous_lat = grouped["LAT"].shift()
+    previous_lon = grouped["LON"].shift()
+    previous_near_port = grouped["near_port"].shift()
+
+    gap_minutes = (df["BaseDateTime"] - previous_time).dt.total_seconds() / 60
+    has_previous_position = (
+        previous_time.notna() & previous_lat.notna() & previous_lon.notna()
+    )
+    positive_gap_count = int((has_previous_position & (gap_minutes > 0)).sum())
+    touches_open_water = (previous_near_port == False) | (df["near_port"] == False)
+    event_mask = (
+        has_previous_position
+        & (gap_minutes >= min_gap_minutes)
+        & touches_open_water
+        & is_valid_mmsi(df["MMSI"])
+    )
+
+    current_columns = [
+        "MMSI",
+        "VesselName",
+        "CallSign",
+        "IMO",
+        "IMO_FLAGGED",
+        "VesselType",
+        "BaseDateTime",
+        "LAT",
+        "LON",
+        "SOG",
+        "Status",
+        "nearest_port",
+        "port_distance_km",
+        "near_port",
+    ]
+    events = df.loc[event_mask, current_columns].copy()
+    event_index = events.index
+
+    events["previous_time"] = previous_time.loc[event_index]
+    events["gap_minutes"] = gap_minutes.loc[event_index]
+    events["previous_lat"] = previous_lat.loc[event_index]
+    events["previous_lon"] = previous_lon.loc[event_index]
+    events["previous_near_port"] = previous_near_port.loc[event_index]
+    for source_column, output_column in [
+        ("SOG", "previous_sog"),
+        ("Status", "previous_status"),
+        ("nearest_port", "previous_nearest_port"),
+        ("port_distance_km", "previous_port_distance_km"),
+    ]:
+        events[output_column] = grouped[source_column].shift().loc[event_index]
+
+    events["gap_distance_km"] = haversine_km(
+        events["previous_lat"],
+        events["previous_lon"],
+        events["LAT"],
+        events["LON"],
+    )
+    events["gap_touches_open_water"] = True
+    events["gap_both_open_water"] = (
+        (events["previous_near_port"] == False) & (events["near_port"] == False)
+    )
+    events["endpoint_context"] = events.apply(endpoint_context, axis=1)
+    return events, positive_gap_count
+
+
 def detect_signal_gaps(
     fused_path: Path = FUSED_PATH,
     output_path: Path = OUT_PATH,
     min_gap_minutes: float = DEFAULT_MIN_GAP_MINUTES,
     high_gap_minutes: float = DEFAULT_HIGH_GAP_MINUTES,
+    chunk_rows: int = DEFAULT_CHUNK_ROWS,
+    partition_count: int = DEFAULT_PARTITION_COUNT,
+    expected_event_rows: int | None = EXPECTED_SIGNAL_GAP_EVENTS,
 ) -> pd.DataFrame:
     """
     Detect long AIS signal gaps connected to open water.
@@ -117,51 +266,42 @@ def detect_signal_gaps(
     ]
 
     print(f"Loading fused AIS data from {fused_path}...")
-    df = pd.read_csv(fused_path, usecols=columns)
-    df["BaseDateTime"] = pd.to_datetime(df["BaseDateTime"])
-    df["mmsi_is_valid"] = is_valid_mmsi(df["MMSI"])
+    with tempfile.TemporaryDirectory(
+        prefix="signal_gaps_",
+        dir=fused_path.parent,
+    ) as temporary_directory:
+        partition_paths, input_rows, unique_mmsis, valid_mmsi_rows = (
+            partition_fused_data(
+                fused_path=fused_path,
+                partition_dir=Path(temporary_directory),
+                columns=columns,
+                chunk_rows=chunk_rows,
+                partition_count=partition_count,
+            )
+        )
 
-    print(f"  Fused row count: {len(df):,}  (expected {EXPECTED_FUSED_ROWS:,})")
-    if len(df) != EXPECTED_FUSED_ROWS:
-        print("  WARNING: unexpected row count. Check that the fused Phase 3 file was used.")
+        print(f"  Fused row count: {input_rows:,}  (expected {EXPECTED_FUSED_ROWS:,})")
+        if input_rows != EXPECTED_FUSED_ROWS:
+            print("  WARNING: unexpected row count. Check that the fused Phase 3 file was used.")
 
-    df = df.sort_values(["MMSI", "BaseDateTime"]).reset_index(drop=True)
+        event_frames = []
+        positive_gap_count = 0
+        for partition_number, partition_path in enumerate(partition_paths, start=1):
+            partition_events, partition_positive_gaps = process_partition(
+                partition_path,
+                min_gap_minutes=min_gap_minutes,
+                high_gap_minutes=high_gap_minutes,
+            )
+            positive_gap_count += partition_positive_gaps
+            if not partition_events.empty:
+                event_frames.append(partition_events)
+            print(
+                f"  Processed partition {partition_number}/{len(partition_paths)}: "
+                f"{len(partition_events):,} events"
+            )
 
-    previous = df.groupby("MMSI").shift()
-    df["previous_time"] = previous["BaseDateTime"]
-    df["previous_lat"] = previous["LAT"]
-    df["previous_lon"] = previous["LON"]
-    df["previous_sog"] = previous["SOG"]
-    df["previous_status"] = previous["Status"]
-    df["previous_nearest_port"] = previous["nearest_port"]
-    df["previous_port_distance_km"] = previous["port_distance_km"]
-    df["previous_near_port"] = previous["near_port"]
-
-    gaps = df.dropna(subset=["previous_time", "previous_lat", "previous_lon"]).copy()
-    gaps["gap_minutes"] = (
-        gaps["BaseDateTime"] - gaps["previous_time"]
-    ).dt.total_seconds() / 60
-    gaps = gaps[gaps["gap_minutes"] > 0].copy()
-
-    gaps["gap_distance_km"] = haversine_km(
-        gaps["previous_lat"],
-        gaps["previous_lon"],
-        gaps["LAT"],
-        gaps["LON"],
-    )
-    gaps["gap_touches_open_water"] = (gaps["previous_near_port"] == False) | (
-        gaps["near_port"] == False
-    )
-    gaps["gap_both_open_water"] = (gaps["previous_near_port"] == False) & (
-        gaps["near_port"] == False
-    )
-    gaps["endpoint_context"] = gaps.apply(endpoint_context, axis=1)
-
-    valid_mmsi = gaps["mmsi_is_valid"]
-    long_gap = gaps["gap_minutes"] >= min_gap_minutes
-    touches_open_water = gaps["gap_touches_open_water"]
-
-    events = gaps[valid_mmsi & long_gap & touches_open_water].copy()
+    events = pd.concat(event_frames, ignore_index=True)
+    events = events.sort_values(["MMSI", "BaseDateTime"]).reset_index(drop=True)
 
     events = events[
         [
@@ -208,10 +348,10 @@ def detect_signal_gaps(
     )
 
     print("\n--- SIGNAL GAP RULE VERIFICATION ---")
-    print(f"1. Input rows:                         {len(df):,}")
-    print(f"2. Unique MMSIs:                       {df['MMSI'].nunique():,}")
-    print(f"3. Valid-looking MMSI rows:            {int(df['mmsi_is_valid'].sum()):,}")
-    print(f"4. Consecutive gaps with positive time:{len(gaps):,}")
+    print(f"1. Input rows:                         {input_rows:,}")
+    print(f"2. Unique MMSIs:                       {unique_mmsis:,}")
+    print(f"3. Valid-looking MMSI rows:            {valid_mmsi_rows:,}")
+    print(f"4. Consecutive gaps with positive time:{positive_gap_count:,}")
     print(f"5. Signal gap events:                  {len(events):,}")
     print(f"6. Unique MMSIs flagged:               {events['MMSI'].nunique():,}")
 
@@ -250,8 +390,18 @@ def detect_signal_gaps(
             .to_string(index=False)
         )
 
+    if expected_event_rows is not None and len(events) != expected_event_rows:
+        raise RuntimeError(
+            f"Signal-gap output has {len(events):,} rows; "
+            f"expected {expected_event_rows:,}. Existing output was not replaced."
+        )
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    events.to_csv(output_path, index=False)
+    candidate_path = output_path.with_name(
+        f".{output_path.name}.{uuid4().hex}.candidate"
+    )
+    events.to_csv(candidate_path, index=False)
+    os.replace(candidate_path, output_path)
     print(f"\nWritten to: {output_path}")
     print(f"Output rows: {len(events):,}")
 
