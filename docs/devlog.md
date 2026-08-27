@@ -1,3 +1,59 @@
+# Devlog — First Successful Full Airflow DAG Run
+
+The complete 10-task maritime anomaly pipeline finished successfully in
+Airflow on August 26, 2026.
+
+The run started at 7:04 PM and finished at 7:44 PM Bogotá time, taking
+40 minutes 28 seconds. Every task completed successfully, including the final
+`verify_outputs` quality gate.
+
+## Problems Discovered During Orchestration
+
+The first full-scale Airflow attempts exposed three problems that had not
+appeared in the original local Phase 3 run:
+
+1. A persisted clean-AIS CSV was corrupted after the in-memory cleaning step
+   completed successfully.
+2. `detect_signal_gaps` was killed after reaching approximately 6.10 GiB.
+3. `detect_unusual_port_behavior` was killed after reaching approximately
+   6.05 GiB.
+
+## Engineering Fixes
+
+- Added strict validation at persisted-file boundaries.
+- Added candidate-file validation and atomic publication.
+- Replaced whole-dataset shifts with disk-backed MMSI partitioning.
+- Shifted only the columns required by each anomaly rule.
+- Preserved complete vessel histories across input chunks.
+- Added golden-count checks before publishing final anomaly outputs.
+
+## Final Result
+
+All 10 Airflow tasks completed successfully:
+
+- Clean AIS rows: `7,284,239`
+- Fused AIS rows: `7,284,239`
+- Loitering events: `2,933`
+- Identity inconsistency events: `0`
+- Speed inconsistency events: `54`
+- Signal-gap events: `311`
+- Unusual-port behavior events: `69`
+- Combined anomaly events: `3,367`
+- Signal gaps with windspeed: `311`
+- Signal gaps with visibility: `311`
+- Final quality gate: passed
+
+## Main Lesson
+
+Local success does not prove that a data pipeline is production-ready. Running
+the complete workflow under orchestration exposed persistence and memory
+failures that did not appear in the original seven-minute local run.
+
+The successful DAG run confirmed that the persisted-file guardrails and both
+bounded-memory anomaly detectors work inside the real Docker worker environment.
+
+---
+
 # Devlog — Fixing the Signal-Gap Memory Failure
 
 During the full DAG run, `detect_signal_gaps` failed with:
