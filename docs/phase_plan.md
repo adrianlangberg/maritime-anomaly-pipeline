@@ -60,21 +60,24 @@ events table was populated.
 
 ---
 
-**Phase 4 — Orchestration & Cloud (Week 4)**
+**Phase 4 — Orchestration & Cloud (Week 4) — IN PROGRESS**
 
 What this phase does:
 Turns the collection of scripts into a real pipeline — one that runs automatically in sequence, on a schedule, in the cloud.
 
 Specific tasks:
-- ⬜ Install Docker Desktop
-- ⬜ Set up Apache Airflow via Docker (fallback: Prefect if Airflow setup exceeds 4 hours)
-- ⬜ Write Airflow DAG that sequences: ingest → validate → fuse → anomaly rules → store results
+- ✅ Install Docker Desktop
+- ✅ Set up Apache Airflow 3.3.0 via Docker with CeleryExecutor, PostgreSQL, and Redis
+- ✅ Write a 10-task Airflow DAG that sequences validation → fusion → anomaly rules → final verification
+- ⬜ Add ingestion/download to the DAG if fully automated source acquisition remains in scope
 - ⬜ Set up Azure Blob Storage for raw data
 - ⬜ Add one Azure serverless function for a transform step
-- ⬜ Confirm pipeline runs end-to-end without manual intervention
-- ⬜ Branch: `feature/orchestration`, PR, merge to main
+- ✅ Confirm the complete local DAG runs end-to-end successfully (10/10 tasks, 40m 28s)
+- ⬜ Decide and document the production schedule (current `schedule=None`, manual trigger)
+- ⬜ Branch: `feature/airflow-orchestration`, PR, merge to main
 
-Closes when: Airflow DAG runs the full pipeline automatically, raw data in Azure Blob, PR merged.
+Closes when: ingestion/scheduling scope is resolved, raw data is in Azure Blob,
+the serverless transform is connected, and the orchestration PR is merged.
 
 ---
 
