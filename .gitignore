@@ -229,3 +229,9 @@ venv/
 # Large data files
 *.zip
 *.csv
+
+# Airflow orchestration (Phase 4) - runtime artifacts, not source
+/logs/
+/plugins/
+/config/
+/.claude/

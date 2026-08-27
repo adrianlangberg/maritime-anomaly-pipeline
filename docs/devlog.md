@@ -1,3 +1,704 @@
+# Devlog — First Successful Full Airflow DAG Run
+
+The complete 10-task maritime anomaly pipeline finished successfully in
+Airflow on August 26, 2026.
+
+The run started at 7:04 PM and finished at 7:44 PM Bogotá time, taking
+40 minutes 28 seconds. Every task completed successfully, including the final
+`verify_outputs` quality gate.
+
+## Problems Discovered During Orchestration
+
+The first full-scale Airflow attempts exposed three problems that had not
+appeared in the original local Phase 3 run:
+
+1. A persisted clean-AIS CSV was corrupted after the in-memory cleaning step
+   completed successfully.
+2. `detect_signal_gaps` was killed after reaching approximately 6.10 GiB.
+3. `detect_unusual_port_behavior` was killed after reaching approximately
+   6.05 GiB.
+
+## Engineering Fixes
+
+- Added strict validation at persisted-file boundaries.
+- Added candidate-file validation and atomic publication.
+- Replaced whole-dataset shifts with disk-backed MMSI partitioning.
+- Shifted only the columns required by each anomaly rule.
+- Preserved complete vessel histories across input chunks.
+- Added golden-count checks before publishing final anomaly outputs.
+
+## Final Result
+
+All 10 Airflow tasks completed successfully:
+
+- Clean AIS rows: `7,284,239`
+- Fused AIS rows: `7,284,239`
+- Loitering events: `2,933`
+- Identity inconsistency events: `0`
+- Speed inconsistency events: `54`
+- Signal-gap events: `311`
+- Unusual-port behavior events: `69`
+- Combined anomaly events: `3,367`
+- Signal gaps with windspeed: `311`
+- Signal gaps with visibility: `311`
+- Final quality gate: passed
+
+## Main Lesson
+
+Local success does not prove that a data pipeline is production-ready. Running
+the complete workflow under orchestration exposed persistence and memory
+failures that did not appear in the original seven-minute local run.
+
+The successful DAG run confirmed that the persisted-file guardrails and both
+bounded-memory anomaly detectors work inside the real Docker worker environment.
+
+---
+
+# Devlog — Fixing the Signal-Gap Memory Failure
+
+During the full DAG run, `detect_signal_gaps` failed with:
+
+`return code -9`
+
+This meant the task ran out of RAM and the operating system killed it.
+
+The worker used about **6.1 GiB**, while Docker only had about **7.59 GiB** available for the whole Airflow setup.
+
+The signal-gap logic itself was correct. The problem was that the old code tried to hold too much data in memory at once.
+
+It loaded all **7.28 million rows** into pandas, sorted them, created previous-record copies, and then created even more copies for the calculations.
+
+Eventually, Docker ran out of available memory.
+
+## The Fix
+
+The easy workaround would have been to give Docker more RAM.
+
+I did not want to do that because the same problem could come back as the project gets bigger.
+
+Instead, I changed the script to process smaller amounts of data at a time.
+
+The new version:
+
+- Reads **250,000 rows at a time**
+- Groups vessel records into **64 temporary partitions** using `MMSI`
+- Makes sure all records for the same vessel end up together
+- Processes one partition at a time
+- Filters unnecessary rows before doing the expensive distance calculations
+
+The main change can be summarized like this:
+
+```python
+# Read bounded chunks and keep every vessel's records in one partition.
+for chunk in pd.read_csv(fused_path, chunksize=250_000):
+    partition_ids = pd.util.hash_pandas_object(
+        chunk["MMSI"], index=False
+    ) % 64
+    write_rows_to_partitions(chunk, partition_ids)
+
+# Load and process only one MMSI-complete partition at a time.
+for partition_path in partition_paths:
+    df = pd.read_csv(partition_path)
+    df = df.sort_values(["MMSI", "BaseDateTime"])
+    previous_time = df.groupby("MMSI")["BaseDateTime"].shift()
+    events.append(filter_signal_gaps(df, previous_time))
+```
+
+This keeps the memory usage much lower.
+
+After all the smaller partitions are processed, the signal-gap events are combined into one final output.
+
+The script also checks that exactly **311 signal-gap events** were produced before replacing the final file.
+
+The new version finished successfully with **exit code 0** and produced:
+
+- **284** open-to-open events
+- **20** open-to-port events
+- **7** port-to-open events
+- **311 total events**
+
+## Main Lesson
+
+The code was logically correct, but it did not scale well in memory.
+
+Instead of solving the problem by adding more RAM, I changed the way the data is processed so the entire 7.28-million-row dataset does not need to be in memory at the same time.
+
+---
+
+# Devlog Update — Root Cause, Fix Plan, and What Actually Changed
+
+The actual problem was **file corruption during the CSV write**, not a bug in my cleaning logic or in `join_ports`.
+
+`clean_ais` correctly produced **7,284,239 rows in memory**, but while the roughly 880 MB cleaned CSV was being written through Docker to the Windows filesystem, part of the file was corrupted.
+
+A block of **1,058 NUL bytes** overwrote part of the CSV, destroying 8 records and mangling a 9th. That damaged row shifted the ship call sign `WDG8602` into the `LAT` column.
+
+`join_ports` then received that corrupted file and eventually crashed when `np.radians()` tried to perform math on `WDG8602`.
+
+So the real chain was:
+
+```text
+clean_ais logic ✅
+        ↓
+CSV write becomes corrupted ❌
+        ↓
+join_ports receives bad input
+        ↓
+LAT contains "WDG8602"
+        ↓
+np.radians() fails
+```
+
+The exact low-level cause of the corruption is still not proven. It could involve Docker Desktop, Windows file I/O, or another storage-layer issue. The corruption did not repeat when the file was regenerated, so I cannot call it a repeatable Docker bug.
+
+## Expected Fix vs. Actual Fix
+
+My original fix plan was very close to what was eventually implemented.
+
+I planned to:
+
+- Delete the corrupted file and regenerate it
+- Check the new file's row count, NUL bytes, and numeric LAT/LON values
+- Add validation after `clean_ais` writes
+- Add validation before `join_ports` does math
+- Avoid hiding the problem with `low_memory=False` or coercing bad data to `NaN`
+- Fail loudly with a clear error if the data is invalid
+
+That overall approach was correct.
+
+The final implementation made four improvements:
+
+**1. Preserve instead of delete**
+
+Instead of deleting the corrupted file, I preserved it as evidence.
+
+This turned out to be useful because I could use the known-bad file to prove that the new validator actually catches the original corruption.
+
+**2. One clean rerun does not prove it was a fluke**
+
+I originally thought rerunning `clean_ais` would tell me whether the corruption was a fluke or repeatable.
+
+The regenerated file came out completely clean:
+
+- `7,284,239` rows
+- `0` NUL bytes
+- Valid LAT/LON
+- Correct schema
+
+That proves the corruption did not repeat **this time**, but it does not prove the storage issue can never happen again.
+
+**3. Safer write process**
+
+Instead of writing directly to the final CSV and checking afterward, `clean_ais` now:
+
+```text
+writes candidate file
+        ↓
+reopens and validates it
+        ↓
+GOOD → atomically replace final file
+BAD  → fail and preserve candidate
+```
+
+This is safer because a corrupt new write cannot automatically overwrite an existing good file.
+
+**4. One shared validator**
+
+Instead of writing separate validation logic inside `clean_ais` and `join_ports`, both use the same shared validator.
+
+This keeps the rules consistent and avoids having two copies of the same checks that could drift apart later.
+
+## Main Learning
+
+The biggest lesson is that **a task finishing successfully does not guarantee that the file it wrote is valid**.
+
+My DataFrame was correct in memory and `clean_ais` exited successfully, but the persisted CSV was still damaged.
+
+That means validation should happen at the boundaries between pipeline tasks.
+
+Going forward:
+
+- `clean_ais` validates its output **after writing**
+- `join_ports` validates its input **before processing**
+- corrupted data fails loudly instead of being silently ignored or converted
+
+I also learned that fixes like:
+
+```python
+pd.read_csv(..., low_memory=False)
+pd.to_numeric(..., errors="coerce")
+```
+
+would only make the crash quieter. They would not restore the missing 8 records or repair the malformed row.
+
+The goal is not just to make the pipeline run.
+
+The goal is to make sure the pipeline only continues when the data itself is trustworthy.
+
+---
+
+# Devlog — First Full DAG Run: Found a Data-Corruption Bug
+
+I triggered my first full pipeline run in Airflow.
+
+The result: `clean_ais` succeeded, but `join_ports` failed. Because of that failure, all downstream tasks were blocked and showed **“upstream failed.”**
+
+This is actually the DAG working correctly. One task failed, so Airflow stopped the pipeline instead of allowing bad data to continue through the remaining steps.
+
+## The Failure
+
+`join_ports` crashed when `np.radians()` encountered:
+
+`WDG8602`
+
+This should have been a numeric latitude, but `WDG8602` is actually a ship's call sign. Because the record became corrupted, the call sign shifted into the latitude column, and `join_ports` tried to perform a mathematical calculation on text.
+
+I investigated the root cause instead of only fixing the crash and found two important things.
+
+### 1. The row count was wrong
+
+`join_ports` read:
+
+**7,284,231 rows**
+
+My expected golden row count was:
+
+**7,284,239 rows**
+
+That meant the saved file was **8 rows short**.
+
+### 2. The `clean_ais` logic was actually correct
+
+Inside memory, `clean_ais` produced exactly:
+
+**7,284,239 rows**
+
+So my cleaning rules had not accidentally removed eight additional records.
+
+The problem happened while the cleaned DataFrame was being written to disk.
+
+The investigation found a block of NUL bytes inside the roughly 880 MB cleaned CSV. That corrupted section replaced data belonging to nine vessel records. Eight records were completely lost, while the ninth was partially damaged.
+
+This explains the exact difference:
+
+**9 expected records → 1 malformed record = 8 missing rows**
+
+The damaged ninth record also caused its columns to shift. A ship's call sign, `WDG8602`, ended up inside the `LAT` column, which is what eventually caused `join_ports` to fail.
+
+The evidence points to corruption occurring while the large CSV was being written through the Docker Desktop bind mount onto the Windows filesystem. I cannot prove whether Docker Desktop, Windows, or another lower-level I/O issue specifically caused it, so I should not call this a pandas or Python logic bug.
+
+## Key Lesson
+
+A successful Python task does not automatically mean the file it produced is valid.
+
+`clean_ais` had the correct data in memory and exited successfully, but the persisted CSV was corrupted afterward.
+
+The tempting fixes would have been things like:
+
+`low_memory=False`
+
+or converting invalid coordinate values to `NaN`.
+
+Those changes might have hidden the error, but they would not have restored the eight missing records or repaired the corrupted row.
+
+That would create something worse: a pipeline that finishes successfully while silently producing incorrect data.
+
+I would rather have the pipeline fail loudly than continue with corrupted data.
+
+## My Fix
+
+Instead of hiding the problem, I am going to add validation at the boundary between `clean_ais` and `join_ports`.
+
+`clean_ais` will write its output, reopen it, and verify that the persisted file is actually valid. The checks will include:
+
+* Expected row count
+* Correct schema
+* No NUL-byte corruption
+* Numeric latitude and longitude values
+
+If those checks fail, `clean_ais` should fail instead of reporting success and passing a corrupted file downstream.
+
+I will also harden `join_ports`.
+
+Before doing any port calculations, it should check that the expected row count is present and that the coordinate columns contain valid numeric values. If not, it should stop immediately and report exactly what is wrong.
+
+This should turn a confusing downstream error like:
+
+`np.radians('WDG8602')`
+
+into a much clearer failure such as:
+
+`Input validation failed: non-numeric LAT value detected`
+
+## Next Step
+
+My next step is to add these safety checks, regenerate the cleaned CSV, and rerun the pipeline.
+
+Then I need to confirm that the cleaned file survives the write correctly before `join_ports` starts, and finally rerun the full DAG to see whether all 10 tasks complete successfully.
+
+
+## Suggested Fix
+
+My next step is to delete the broken file, have `clean_ais` build a fresh one, and then check if the new file is also corrupted.
+
+This creates a worker container, runs the cleaning script, and verifies the row count, NUL bytes, and whether the `LAT` and `LON` data types are numeric.
+
+This will confirm whether the corruption was a random fluke or something repeatable.
+
+Then I want to add two safety nets:
+
+**A:** After the file is saved, immediately reopen it and check that it is not broken.
+
+**B:** Before doing any math in `join_ports`, check that the input is valid. If it is not, stop with a clear error.
+
+Why?
+
+Right now, `join_ports` blindly trusts its input and crashes about six minutes later with a weird `np.radians` error.
+
+With these checks, it can fail immediately with a message that actually explains what is wrong.
+
+## The Guardrail
+
+These are not real fixes:
+
+```python
+pd.read_csv(..., low_memory=False)        # ❌ hides the crash
+pd.to_numeric(..., errors="coerce")       # ❌ turns bad data into NaN
+```
+
+We want to fix the problem, not make the error quiet.
+
+Those two lines could make the crash disappear, but the eight rows would still be missing and the data would still be wrong. The pipeline could keep running while silently producing incorrect results.
+
+We are explicitly avoiding that lazy fix.
+
+That is the whole point of the guardrails.
+
+## In One Picture
+
+```text
+JOB 1:
+
+Delete bad file
+    ↓
+Rerun clean_ais
+    ↓
+Is the new file clean or corrupt?
+    ↓
+Was it a fluke or is it repeatable?
+```
+
+```text
+JOB 2:
+
+Add self-checks so the pipeline catches corruption
+
+clean_ais
+    ↓
+validates AFTER writing
+    ↓
+fails if the file is broken
+
+join_ports
+    ↓
+validates BEFORE doing math
+    ↓
+stops immediately if the input is bad
+```
+
+**BANNED:** any fix that hides the error instead of solving it.
+
+---
+
+# Devlog — Chunk 4: Completing and Verifying the DAG
+
+In chunk 3, my Airflow DAG ended with `detect_unusual_port_behavior` and contained a total of 8 tasks.
+
+In chunk 4, I added the final two tasks:
+
+1. `build_anomaly_events`
+2. `verify_outputs`
+
+The first new task, `build_anomaly_events`, runs my existing script called `build_anomaly_events.py`.
+
+Its purpose is to combine the outputs from the five anomaly-detection rules into one common anomaly-events table.
+
+This is important because before this step, my five anomaly detectors produced separate rule-specific event files. `build_anomaly_events` brings those results together into one final dataset.
+
+After `build_anomaly_events` finishes successfully, it is time to verify the outputs.
+
+This became processing task number 9 in the pipeline.
+
+---
+
+The second new task is `verify_outputs`.
+
+At first, I looked for an existing `verify_outputs.py` script, but there wasn't one.
+
+However, I already had verification logic inside `run_phase3.py`.
+
+The two existing verification functions are:
+
+- `verify_output_rows()`
+- `verify_weather_context()`
+
+I did not want to copy this verification logic or duplicate the expected row counts because then I would have two places containing the same rules. If one was changed and the other wasn't, they could disagree and create bugs.
+
+Instead, I created a small wrapper script called `verify_outputs.py`.
+
+The wrapper imports those two functions from `run_phase3.py` and runs them both. This gives Airflow a standalone command it can execute without rewriting the verification logic.
+
+I learned that a wrapper script is basically a small file that borrows and runs code that already exists somewhere else. Instead of rewriting the logic, it acts as a thin layer that gives existing functions another way to be executed.
+
+In this case, it gives Airflow something it can run as a standalone command.
+
+The Airflow task runs:
+
+```text
+python /opt/airflow/src/pipeline/verify_outputs.py
+```
+
+---
+
+The verification task is different from the first nine tasks because it does not create, alter, or ingest new data. Its job is to check the outputs that the pipeline already created.
+
+The first nine tasks process or transform data, while `verify_outputs` checks the finished outputs against known expected row counts and verifies the weather-context coverage.
+
+If one of the verification functions detects a bad result, it raises a `RuntimeError`.
+
+Because that error is not caught, Python stops the script and exits with a non-zero exit code.
+
+Airflow then sees that non-zero exit code and marks the `verify_outputs` task as failed, which causes the DAG run to fail.
+
+This means a pipeline is not considered successful just because all of the processing scripts finished running.
+
+The final outputs also have to pass the quality checks I defined.
+
+---
+
+My completed dependency chain is now:
+
+`clean_ais >> join_ports >> detect_loitering >> detect_identity_inconsistency >> detect_speed_inconsistency >> detect_signal_gaps >> add_weather_context >> detect_unusual_port_behavior >> build_anomaly_events >> verify_outputs`
+
+The DAG now contains 10 total tasks.
+
+The first 9 are processing tasks matching the order in `run_phase3.py`.
+
+The 10th and final task is `verify_outputs`, which acts as a quality gate after the processing is complete.
+
+---
+
+I validated the DAG by running a Python syntax check, an Airflow import check, and checking the parsed task relationships.
+
+The results showed:
+
+- Python syntax: passed
+- Airflow import errors: `[]`
+- Total tasks: 10
+
+Airflow also correctly parsed `build_anomaly_events` as being downstream of `detect_unusual_port_behavior` and `verify_outputs` as being downstream of `build_anomaly_events`.
+
+However, this does **not** mean that the full data pipeline has successfully run yet.
+
+It only proves that the Python is valid, Airflow can understand the DAG, all 10 tasks exist, and the dependencies are connected correctly.
+
+Nothing has been triggered yet, so my next major step is to manually trigger the complete DAG and watch each task run in the Airflow UI.
+
+During that first full run, I will watch the task statuses and logs, confirm that every task succeeds, and make sure the final `verify_outputs` quality checks pass.
+
+---
+
+Devlog — Chunk 3: Adding the Anomaly Detection Rules
+
+In chunk 2, my DAG only had two tasks:
+clean_ais >> join_ports
+
+In chunk 3, I expanded the DAG by adding 6 more tasks. These new tasks are:
+
+detect_loitering
+detect_identity_inconsistency
+detect_speed_inconsistency
+detect_signal_gaps
+add_weather_context
+detect_unusual_port_behavior
+
+I decided to use a detect_ prefix because it groups the detector tasks visually in the Airflow UI. For example:
+
+Setup / Fusion: clean_ais, join_ports
+Detectors: detect_loitering, detect_identity_inconsistency, detect_speed_inconsistency, detect_signal_gaps, detect_unusual_port_behavior
+Enrichment: add_weather_context
+
+Instead of calling a task just loitering, I use detect_loitering. This helps me and other users understand more quickly what the task is actually doing.
+
+Each anomaly task still uses a BashOperator because I already wrote and tested the rules as standalone Python programs. Airflow does not need to rewrite the logic. It only needs a way to launch those existing scripts. For example, the detect_loitering task runs:
+python /opt/airflow/src/anomaly_rules/loitering.py
+
+The five anomaly-detection rules are included in this chunk because I already understand the basic dependency pattern. Adding every detector in a separate learning chunk would now be repetitive and inefficient. Those five rules are:
+
+Loitering
+Identity inconsistency
+Speed inconsistency
+Signal gaps
+Unusual port behavior
+
+All five rules use the fused AIS dataset produced after join_ports. The fused dataset is important because it contains the vessel position data plus information about the nearest port.
+
+One thing I learned in this chunk is that not every arrow in the DAG means that one task needs the previous task's output. For example, detect_loitering and detect_identity_inconsistency both read the same fused CSV, so the dependency between them is not a mandatory data dependency. It is mainly about sequencing and execution order. They are still running sequentially because I chose run_phase3.py as the authoritative order, and running them one at a time avoids multiple detector tasks loading the large fused CSV at the same time.
+
+The dependency chain now looks like this:
+clean_ais >> join_ports >> detect_loitering >> detect_identity_inconsistency >> detect_speed_inconsistency >> detect_signal_gaps >> add_weather_context >> detect_unusual_port_behavior
+
+This means Airflow will only continue to the next task if the previous task finishes successfully.
+
+There is one dependency that is especially important:
+detect_signal_gaps >> add_weather_context
+This is a true data dependency because add_weather_context reads and rewrites the signal_gap_events.csv file that detect_signal_gaps produces. It enriches those exact signal-gap events with weather data. If detect_signal_gaps does not successfully create signal_gap_events.csv, then add_weather_context has no file to read and would fail.
+
+Compared with chunk 2, the main difference is that my DAG is no longer just proving that two scripts can run in order. It is now a full sequence of scripts that models a real multi-step anomaly-detection workflow.
+
+The pipeline currently contains 8 Airflow tasks in total. The final combine task and verification task are not included yet because I still need to add build_anomaly_events.py as an Airflow task and then add a verification task for the final outputs.
+
+My next step is to add those final tasks and complete the DAG.
+
+---
+
+## Devlog — Chunk 2: Adding `join_ports`
+
+In chunk 2, I added the second task to my Airflow DAG called `join_ports`.
+
+I used another `BashOperator` because once again I already have an existing Python script that needs to be run by Airflow. The BashOperator gives Airflow the ability to run that script using a shell command.
+
+The command Airflow will run for this task is:
+
+`python /opt/airflow/src/fusion/join_ports.py`
+
+The important new line in this chunk is:
+
+`clean_ais >> join_ports`
+
+This means that `join_ports` can only start after `clean_ais` finishes successfully.
+
+If `clean_ais` fails, then `join_ports` will not run.
+
+This dependency is important because it helps make sure reliable data is transferred step by step through the pipeline.
+
+Before adding this dependency, I would have to manually run the two scripts one after the other.
+
+Now Airflow knows the correct order of the tasks and can enforce that order for me.
+
+This is the first time my DAG has more than one task, so it is starting to become a usable pipeline.
+
+My next step is to keep chaining the remaining tasks until all 9 pipeline steps are connected.
+
+---
+
+# Devlog: First Airflow DAG
+
+Today I am writing my first Airflow DAG for my maritime anomaly pipeline.
+
+I called the DAG:
+
+`dag_id="maritime_anomaly_pipeline"`
+
+Before this, my `clean_ais.py` script was already working by itself. It takes around 7.28 million raw ocean/AIS pings and removes junk data such as missing positions, impossible values, and duplicates.
+
+The raw dataset contains 7,284,415 rows.
+
+After cleaning, the output contains 7,284,239 rows, meaning 176 unnecessary rows were removed.
+
+That final row count is important because it gives me a number I can use later to check whether data is accidentally being lost somewhere else in the pipeline.
+
+For this first Airflow version, I only added the cleaning step.
+
+I am using a `BashOperator` because my pipeline scripts already exist and work outside of Airflow. The BashOperator gives Airflow a way to execute those existing scripts using shell commands.
+
+The DAG is basically the conductor, and the BashOperator is the bridge that lets the conductor cue work I already built.
+
+The command Airflow will currently run is:
+
+`python /opt/airflow/src/validation/clean_ais.py`
+
+I set `schedule=None` because I do not want this pipeline to run automatically yet.
+
+My scripts currently have a date hardcoded, and there is no new incoming data. Creating a daily schedule would be fake automation because it would look like the pipeline processes new daily data when it would actually keep reprocessing the same frozen dataset.
+
+I set `max_active_runs=1` because I do not want multiple copies of the DAG running at the same time.
+
+My pipeline writes data to shared files, so overlapping runs could potentially interfere with each other or corrupt outputs.
+
+I also learned what `start_date` means.
+
+`start_date` does not pass January 15, 2024 into my Python scripts and it does not decide which AIS date gets processed.
+
+It is scheduling metadata used by Airflow. My cleaning script still controls its own input date internally.
+
+I verified that Airflow successfully recognized the DAG by checking for import errors.
+
+The result showed:
+
+`Import errors: []`
+
+This means Airflow found zero import errors and successfully registered the DAG.
+
+The DAG itself has not actually executed yet.
+
+It currently has no automatic schedule, and I intentionally have not manually triggered the first run yet because I want to watch the tasks and logs when I run it for the first time.
+
+Git currently shows:
+
+`?? dags/maritime_anomaly_pipeline.py`
+
+This means the new DAG file is currently untracked. I have created it, but I have not staged or committed it yet.
+
+This is phase 1 of building the DAG.
+
+My next step is to add `join_ports.py`.
+
+That script figures out which port each vessel is near by joining the cleaned ship data with port data.
+
+I will also add my first Airflow dependency:
+
+`clean_ais >> join_ports`
+
+A dependency is basically an arrow that tells Airflow:
+
+“this task must finish successfully before the next task is allowed to start.”
+
+So `join_ports` will not be allowed to start until `clean_ais` finishes successfully.
+
+I am going to keep building the DAG one step at a time and devlog each step.
+
+---
+
+## 2026-08-06 - Phase 4B: Airflow skeleton running in Docker
+
+Quick update: I got Apache Airflow 3.3.0 running locally in Docker. No DAG yet
+- this step was only about proving the engine boots before loading my pipeline
+into it.
+
+I installed WSL 2 and Docker Desktop, pulled the official Airflow 3.3.0
+docker-compose stack, made the folders it needs, and set AIRFLOW_UID=50000 in
+.env. Added logs/, plugins/, config/ to .gitignore as runtime junk - dags/ and
+docker-compose.yaml stay tracked.
+
+The proof, not just a claim:
+- airflow-init exited with code 0, admin user created.
+- All seven containers healthy: apiserver, scheduler, dag-processor, triggerer,
+  worker, postgres, redis.
+- Web UI loaded at localhost:8080, DAGs page empty as expected.
+
+Airflow ran well inside the pre-set 4-hour window, so it stays - no switch to
+Prefect. Committed the skeleton and pushed to feature/airflow-orchestration.
+
+Then I probed the worker container to find the next gap:
+- pandas, requests, sklearn already there -> no custom Dockerfile needed yet.
+- clean_ais.py -> "No such file or directory". Expected: my src/ and data/
+  aren't mounted into the container yet. That's what to build next.
+
+Next session: mount src/ (read-only) and data/ (read-write), recreate, and
+check the container can see the files without running anything. Then test one
+script inside the worker, then build the nine-task DAG.
+
 ## 2026-07-24 - Phase 4: Local pipeline runner
 
 Quick update: I built `run_phase3.py`, the first real orchestration step of
