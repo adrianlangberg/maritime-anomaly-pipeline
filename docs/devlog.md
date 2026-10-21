@@ -1,3 +1,49 @@
+# Devlog — Evidence-Based Priority Ranking
+
+The first Power BI dashboard used a balanced 19-event sample to demonstrate
+manual evaluation. That was useful for comparing detector behavior, but it was
+not a defensible operational review queue. The sample was deliberately selected
+as 6 loitering, 5 signal-gap, 4 unusual-port, and 4 speed-inconsistency events.
+It was not produced by a risk model.
+
+I audited the complete 3,367-event fact table and compared three ranking
+approaches:
+
+1. Reusing the detector `high`, `medium`, and `low` labels.
+2. Ranking statistical extremeness within each detector.
+3. Separating behavioral evidence from data reliability with transparent,
+   detector-specific scoring.
+
+The first approach promoted 1,955 events to the highest tier because detector
+severity labels were never designed to be comparable. The percentile approach
+still promoted 342 events, including 306 loitering events, because extreme
+duration can describe normal offshore operations.
+
+The third approach was selected. It is implemented in
+`src/scoring/priority_ranking.py`, downstream of the detectors and upstream of
+Power BI. Every event now receives:
+
+- `behavior_evidence_score`
+- `data_quality_score`
+- `priority_tier`
+- `review_reason`
+- `supporting_rules`
+
+The scoring build produced 20 P1, 49 P2, 1,643 P3, 200 DQ, and 1,455 Routine
+events while preserving all 3,367 original event IDs. Seven regression tests
+passed. The fixed manual sample remains a sanity check: 3/3 reviewed
+investigation-worthy events route to P1, 6/6 reviewed data-quality events route
+to DQ, and 0/7 reviewed likely-normal events route to P1.
+
+This is an analyst-prioritization model, not a threat classifier. Supervised
+machine learning remains deferred until the project has a larger,
+representative, multi-day review history.
+
+The complete logic, commands, thresholds, expected output, and interview
+explanation are in `docs/priority_ranking_model.md`.
+
+---
+
 # Devlog — First Successful Full Airflow DAG Run
 
 The complete 10-task maritime anomaly pipeline finished successfully in

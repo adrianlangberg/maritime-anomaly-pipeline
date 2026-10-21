@@ -170,4 +170,3 @@ def detect_identity_inconsistency(
 
 if __name__ == "__main__":
     detect_identity_inconsistency()
-    

@@ -60,7 +60,7 @@ events table was populated.
 
 ---
 
-**Phase 4 — Orchestration & Cloud (Week 4) — IN PROGRESS**
+**Phase 4 — Local Orchestration (Week 4) — COMPLETE**
 
 What this phase does:
 Turns the collection of scripts into a real pipeline — one that runs automatically in sequence, on a schedule, in the cloud.
@@ -70,35 +70,44 @@ Specific tasks:
 - ✅ Set up Apache Airflow 3.3.0 via Docker with CeleryExecutor, PostgreSQL, and Redis
 - ✅ Write a 10-task Airflow DAG that sequences validation → fusion → anomaly rules → final verification
 - ⬜ Add ingestion/download to the DAG if fully automated source acquisition remains in scope
-- ⬜ Set up Azure Blob Storage for raw data
-- ⬜ Add one Azure serverless function for a transform step
 - ✅ Confirm the complete local DAG runs end-to-end successfully (10/10 tasks, 40m 28s)
 - ⬜ Decide and document the production schedule (current `schedule=None`, manual trigger)
-- ⬜ Branch: `feature/airflow-orchestration`, PR, merge to main
+- ✅ Preserve exact detector outputs after bounded-memory refactors
 
-Closes when: ingestion/scheduling scope is resolved, raw data is in Azure Blob,
-the serverless transform is connected, and the orchestration PR is merged.
+Closed when: the complete local DAG passed its final output and weather checks.
+Cloud deployment is deferred until the analytical product is validated.
 
 ---
 
-**Phase 5 — Visualization & Polish (Week 5)**
+**Phase 5 — Evaluation & Power BI (Week 5) — IN PROGRESS**
 
 What this phase does:
 Surfaces the flagged anomalies in a visual format and cleans up the codebase.
 
 Specific tasks:
-- ⬜ Build Tableau dashboard:
+- ✅ Profile same-vessel and time-connected cross-detector overlap
+- ✅ Create a balanced 19-event manual-review sample
+- ✅ Separate behavioral review, data-quality, and operational-context lanes
+- ✅ Build validated Power BI-ready fact and dimension tables
+- ✅ Add evidence-based ranking across all 3,367 events
+- ✅ Separate behavioral evidence from data reliability
+- ✅ Publish priority tier, review reason, and time-connected supporting rules
+- ✅ Build Power BI dashboard and save the ranked `.pbix` artifact:
   - Map of flagged vessel positions
   - Flag count by day (high/low anomaly periods visible)
   - Flag type breakdown (going dark vs loitering vs speed vs identity vs port behavior)
   - Filter by vessel type
   - Filter by anomaly type
   - Filter by port proximity (near port vs open water)
-- ⬜ Write basic tests in `tests/` covering at least one function per phase
+- ✅ Add a priority-model page that reconciles P1, P2, P3, DQ, and Routine
+- ✅ Add a P1 analyst queue filtered to the 20 highest-priority events
+- ✅ Relabel the 19-event sample as validation rather than operational rank
+- ⬜ Complete final visual-theme and interaction polish
+- ✅ Add reporting-layer regression tests
 - ⬜ Clean up code, add docstrings to all functions
 - ⬜ Branch: `feature/visualization`, PR, merge to main
 
-Closes when: Tableau dashboard published, tests passing, code clean, PR merged.
+Closes when: the Power BI dashboard is built, visually checked, and documented.
 
 ---
 
