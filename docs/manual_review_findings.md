@@ -77,7 +77,84 @@ reason?"
 ## Review status
 
 - Loitering: reviewed
-- Signal gap: pending
-- Unusual port behavior: pending
-- Speed inconsistency: pending
+- Signal gap: reviewed
+- Unusual port behavior: reviewed
+- Speed inconsistency: reviewed
+
+## Signal-gap review
+
+Signal gaps were the strongest source of behavioral review candidates, but gap
+duration alone was not enough to rank them. WEST AURIGA disappeared for 14.9
+hours and reappeared at the same coordinates with low endpoint speeds. That
+pattern is more consistent with an equipment, receiver-coverage, or source-data
+interruption than concealed travel.
+
+KATHRYN disappeared for 19.9 hours and reappeared 525.6 km away. Its implied
+average speed was 14.3 knots, closely matching the reported endpoint speeds of
+13.4 and 13.9 knots. ZIM NINGBO and ONE CONTRIBUTION showed similar physically
+plausible open-water travel during long reporting absences.
+
+| Vessel | Key evidence | Verdict |
+| --- | --- | --- |
+| WEST AURIGA | 14.9-hour gap, identical endpoints, low speeds | Data quality / reporting availability |
+| PGC MARINA | 10-hour gap, 18.6 km movement, open-to-port | Needs context |
+| ONE CONTRIBUTION | 14.3-hour open-water gap, 402.0 km movement | Investigation-worthy |
+| ZIM NINGBO | 15.3-hour far-offshore gap, 510.7 km movement at plausible speed | Investigation-worthy |
+| KATHRYN | 19.9-hour open-water gap, 525.6 km movement at plausible speed | Investigation-worthy |
+
+### Signal-gap conclusion
+
+A stronger signal-gap candidate combines a long reporting absence, open-water
+endpoints, substantial movement, and an implied speed consistent with reported
+speeds. This supports additional review but does not prove intentional AIS
+shutdown.
+
+## Unusual-port-behavior review
+
+The current rule uses a flat 30 km port radius. Three of four reviewed events
+looked like ordinary passage or threshold effects rather than meaningful port
+behavior. LOU ANNA GUIDRY reported 40-51 knots across only three pings, making
+unreliable position or identity data more plausible than a valid port event.
+
+| Vessel | Key evidence | Verdict |
+| --- | --- | --- |
+| LOU ANNA GUIDRY | 3 pings, 3-minute event, 40-51 knots | Data quality |
+| HOS CROCKETT | Steady 9-knot transit through a broad coastal zone | Likely normal |
+| ALL IN | Continued moving near the outer edge of the 30 km zone | Likely normal |
+| PRINCESS IVY | 28-29 km from port and just above the 2-knot slowdown cutoff | Likely normal |
+
+### Unusual-port conclusion
+
+The rule applies its thresholds correctly, but circular port zones do not model
+real harbor approaches. Future refinement should use port polygons, entrance
+geometry, heading, and speed-change patterns.
+
+## Speed-inconsistency review
+
+All four reviewed speed events were physically impossible or directly
+contradicted reported vessel speed. The detector provides valuable protection
+against corrupt coordinates, mixed identities, or synthetic data, but its
+outputs belong in a data-quality lane rather than behavioral risk.
+
+| Vessel | Key evidence | Verdict |
+| --- | --- | --- |
+| ADRIATIC | 103.3-knot implied speed versus 22.8-knot reported maximum | Data quality |
+| GAN EDEN | 565.2 km in 11.9 minutes, implying 1,540.9 knots | Data quality |
+| AN ANGEL | 1,882.2 km in 14.5 minutes while reporting 5.8 knots | Data quality |
+| VIEW | 4,423.4 km in 5.7 minutes, sequential-looking MMSI | Data quality |
+
+## Overall manual-review result
+
+| Verdict | Reviewed events |
+| --- | ---: |
+| Investigation-worthy | 3 |
+| Data quality | 6 |
+| Likely normal | 7 |
+| Needs context | 3 |
+
+The pipeline is useful as a screening system, but 3,367 automated events must
+not be presented as 3,367 suspicious incidents. The evaluated product has three
+distinct analysis lanes: behavioral review, data quality, and operational
+context. The next evaluation should use more days and a larger labeled sample
+before estimating detector precision.
 

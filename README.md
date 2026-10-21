@@ -10,7 +10,7 @@ Vessels broadcast position data (AIS) constantly, but raw AIS feeds are noisy, i
 - Fuses it with port location data and weather data for context
 - Applies automated validation rules to catch bad/missing data
 - Flags anomalies: AIS signal gaps (going dark), loitering, speed inconsistency, identity inconsistency, and unusual port behavior
-- Surfaces results through a Dockerized Airflow workflow, with Azure cloud integration in progress
+- Surfaces results through a Dockerized Airflow workflow and a validated Power BI reporting model
 
 ## Status
 
@@ -21,10 +21,19 @@ Local Airflow orchestration is complete on `feature/airflow-orchestration`.
 A complete 10-task DAG run finished successfully using Airflow 3.3.0,
 CeleryExecutor, PostgreSQL, Redis, and Docker Desktop.
 
-Phase 4 cloud integration is still in progress. Azure Blob Storage, an Azure
-serverless transform, and the final pull request into `main` remain.
+Cross-detector evaluation and the Power BI reporting layer are complete on
+`feature/overlap-profiling`. Cloud integration remains future work; the project
+prioritizes a validated analytical story before infrastructure expansion.
+
+An evidence-based priority-ranking layer now scores every detected event on
+behavioral evidence and data reliability. It produces an explainable analyst
+queue without changing the five detectors or their 3,367-event contract.
 
 ## Architecture
+
+See [`docs/architecture.md`](docs/architecture.md) for the layered design,
+data contracts, bounded-memory approach, evaluation method, reporting model,
+and engineering tradeoffs.
 
 ```text
 NOAA AIS CSV
@@ -72,8 +81,9 @@ Its schedule is currently `None`, so runs are triggered manually.
 - World Port Index
 - Open-Meteo weather APIs
 - Git
+- Power BI-ready star-schema exports
 
-Planned cloud integration:
+Future cloud integration:
 
 - Azure Blob Storage
 - Azure Functions
@@ -85,6 +95,8 @@ Planned cloud integration:
     |-- validation/      # Automated data quality checks
     |-- fusion/          # Joining datasets together
     |-- anomaly_rules/   # Rule-based anomaly detection logic
+    |-- scoring/         # Evidence scoring and analyst priority routing
+    |-- reporting/       # Validated Power BI fact and dimension tables
     |-- utils/           # Shared helpers
     dags/                # Airflow orchestration
     docs/                # Architecture decisions, write-ups
@@ -173,6 +185,125 @@ August 26, 2026 at 7:04 PM and finished at 7:44 PM Bogotá time, taking
 | Signal gaps with visibility | 311 |
 
 The final `verify_outputs` task passed.
+
+## Evaluation Findings
+
+The detector outputs were evaluated rather than treated as equally meaningful
+alerts. Of 1,822 flagged vessels, 112 triggered multiple detector types during
+the day and 82 had different rules firing within two hours.
+
+A balanced 19-event manual review produced:
+
+| Verdict | Events |
+|---|---:|
+| Investigation-worthy | 3 |
+| Data-quality issue | 6 |
+| Likely normal | 7 |
+| Needs more context | 3 |
+
+The strongest behavioral candidates were long open-water signal gaps with
+substantial, physically realistic movement. Speed inconsistencies primarily
+identified unreliable AIS records. Loitering and unusual-port events frequently
+needed operational or geographic context.
+
+This means the pipeline is a screening and triage system, not a system for
+determining intent or wrongdoing.
+
+## Evidence-Based Priority Ranking
+
+The balanced 19-event sample is retained as a detector-evaluation artifact. It
+is not used as the operational review queue. A separate scoring layer now ranks
+all 3,367 events using:
+
+- `behavior_evidence_score`: strength of behavioral evidence from 0 to 100
+- `data_quality_score`: reliability of the evidence from 0 to 100
+- `priority_tier`: P1, P2, P3, DQ, or Routine
+- `review_reason`: plain-language explanation
+- `supporting_rules`: detector types connected within a two-hour window
+
+Verified scoring output:
+
+| Priority tier | Events |
+|---|---:|
+| P1 | 20 |
+| P2 | 49 |
+| P3 | 1,643 |
+| DQ | 200 |
+| Routine | 1,455 |
+
+See [`docs/priority_ranking_model.md`](docs/priority_ranking_model.md) for the
+decision history, exact scoring logic, rerun commands, test evidence, model
+limitations, and interview explanation.
+
+See [`docs/priority_model_visual_story.md`](docs/priority_model_visual_story.md)
+for the factor-by-factor audit and the narrative used to explain the score in
+an interview.
+
+## Power BI Reporting Layer
+
+Generate the validated reporting tables:
+
+```powershell
+python src/reporting/build_powerbi_dataset.py
+```
+
+Expected output:
+
+```text
+fact_anomaly_events.csv         3,367 rows
+dim_vessels.csv                 1,822 rows
+dim_anomaly_types.csv               5 rows
+fact_overlap_pairs.csv             20 rows
+fact_manual_review.csv             19 rows
+fact_priority_score_components.csv 31,843 rows
+priority_factor_summary.csv            42 rows
+dim_detector_score_ceilings.csv          5 rows
+dim_priority_tiers.csv                  5 rows
+POWER BI DATASET PASSED
+```
+
+The reporting layer enriches the common event table with detector-specific
+evidence, applies the downstream priority model, separates behavioral review
+from data quality and operational context, and validates keys, relationships,
+timestamps, coordinates, scores, manual labels, and golden row counts. See
+`docs/powerbi_dashboard_guide.md` for the data model,
+DAX measures, and dashboard story. See
+`docs/powerbi_reporting_walkthrough.md` for the exact commands, transformation
+logic, validation decisions, and an interview-ready explanation.
+
+The finished local report with the explainability pages is
+[`data/powerbi/maritime_anomaly_dashboard_priority_story_final.pbix`](data/powerbi/maritime_anomaly_dashboard_priority_story_final.pbix).
+Its operational queue is filtered to the 20 deterministic P1 events. The
+balanced 19-event sample is kept on separate validation pages so it cannot be
+mistaken for the production review queue.
+
+Generate the four model-explanation charts with:
+
+```powershell
+python src/reporting/build_priority_story_charts.py
+```
+
+Each chart carries one interview story: detector score ceilings, the review
+funnel, Signal Gap factor contributions, and the KATHRYN-versus-WEST-AURIGA
+event-level score anatomy. The SVG files remain the versionable sources; the
+matching PNG renderings are embedded in Power BI for reliable local display.
+
+Rebuild the final nine-page report copy without overwriting the original:
+
+```powershell
+python src/reporting/embed_priority_story_in_pbix.py
+```
+
+This adds `Model Mechanics` and `Score Anatomy`, registers the four local PNG
+assets inside the PBIX, removes the stale package signature, and validates the
+generated archive. Power BI recreates the signature when the report is opened
+and saved in Desktop.
+
+Run its regression tests with:
+
+```powershell
+python -m unittest tests/test_powerbi_reporting.py -v
+```
 
 ## Reliability and Data-Quality Guardrails
 

@@ -1,0 +1,135 @@
+[
+  {
+    "anomaly_type": "loitering",
+    "MMSI": 367148620,
+    "review_start": "2024-01-15 22:04:25",
+    "verdict": "needs_context",
+    "notes": "Exactly at the 60-minute threshold; offshore and slow, but one hour does not establish suspicious intent."
+  },
+  {
+    "anomaly_type": "loitering",
+    "MMSI": 367508280,
+    "review_start": "2024-01-15 04:58:30",
+    "verdict": "likely_normal",
+    "notes": "Dense reporting from one fixed position for 8.5 hours is consistent with planned offshore operations."
+  },
+  {
+    "anomaly_type": "loitering",
+    "MMSI": 368161910,
+    "review_start": "2024-01-15 00:00:04",
+    "verdict": "likely_normal",
+    "notes": "More than 1,000 pings show a stable 20-hour position; vessel-role or offshore-facility context is needed."
+  },
+  {
+    "anomaly_type": "loitering",
+    "MMSI": 367072840,
+    "review_start": "2024-01-15 00:00:03",
+    "verdict": "needs_context",
+    "notes": "Zero movement conflicts with the under-way status, which may be stale or incorrectly maintained."
+  },
+  {
+    "anomaly_type": "loitering",
+    "MMSI": 367001890,
+    "review_start": "2024-01-15 00:00:00",
+    "verdict": "likely_normal",
+    "notes": "Full-day stationary event only 1.8 km beyond the fixed 30 km port boundary."
+  },
+  {
+    "anomaly_type": "loitering",
+    "MMSI": 367643740,
+    "review_start": "2024-01-15 00:00:01",
+    "verdict": "likely_normal",
+    "notes": "Restricted-maneuverability status and proximity to the port cutoff provide an operational explanation."
+  },
+  {
+    "anomaly_type": "signal_gap",
+    "MMSI": 538009623,
+    "review_start": "2024-01-15 06:38:30",
+    "verdict": "data_quality",
+    "notes": "Long reporting absence with identical endpoints and low speeds is more consistent with equipment, coverage, or source-data interruption."
+  },
+  {
+    "anomaly_type": "signal_gap",
+    "MMSI": 311000138,
+    "review_start": "2024-01-15 05:00:41",
+    "verdict": "needs_context",
+    "notes": "Ten-hour gap with only 18.6 km of movement into a port zone may reflect coverage or normal port operations."
+  },
+  {
+    "anomaly_type": "signal_gap",
+    "MMSI": 636021649,
+    "review_start": "2024-01-15 06:20:45",
+    "verdict": "investigation_worthy",
+    "notes": "Open-water gap with 402 km of physically plausible movement at an implied average near 15 knots."
+  },
+  {
+    "anomaly_type": "signal_gap",
+    "MMSI": 636014219,
+    "review_start": "2024-01-15 05:57:05",
+    "verdict": "investigation_worthy",
+    "notes": "Far-offshore 510.7 km movement is physically consistent with reported speeds near 18 knots."
+  },
+  {
+    "anomaly_type": "signal_gap",
+    "MMSI": 319271800,
+    "review_start": "2024-01-15 03:35:31",
+    "verdict": "investigation_worthy",
+    "notes": "Nearly 20-hour open-water gap with 525.6 km of movement and an implied speed consistent with endpoint reports."
+  },
+  {
+    "anomaly_type": "unusual_port_behavior",
+    "MMSI": 367006860,
+    "review_start": "2024-01-15 15:07:14",
+    "verdict": "data_quality",
+    "notes": "Only three pings and reported speeds of 40-51 knots suggest unreliable position or identity data."
+  },
+  {
+    "anomaly_type": "unusual_port_behavior",
+    "MMSI": 367612480,
+    "review_start": "2024-01-15 07:45:29",
+    "verdict": "likely_normal",
+    "notes": "Steady 9-knot transit through a broad coastal port zone looks like passage rather than an attempted port call."
+  },
+  {
+    "anomaly_type": "unusual_port_behavior",
+    "MMSI": 338392382,
+    "review_start": "2024-01-15 17:39:09",
+    "verdict": "likely_normal",
+    "notes": "The vessel stayed near the outer edge of the 30 km zone while continuing to move."
+  },
+  {
+    "anomaly_type": "unusual_port_behavior",
+    "MMSI": 368129990,
+    "review_start": "2024-01-15 12:59:48",
+    "verdict": "likely_normal",
+    "notes": "The event was near the 30 km boundary and missed the 2-knot slowdown threshold by less than one knot."
+  },
+  {
+    "anomaly_type": "speed_inconsistency",
+    "MMSI": 338355282,
+    "review_start": "2024-01-15 01:45:50",
+    "verdict": "data_quality",
+    "notes": "The 103-knot implied speed conflicts with the 22.8-knot reported maximum and a placeholder IMO value."
+  },
+  {
+    "anomaly_type": "speed_inconsistency",
+    "MMSI": 367371520,
+    "review_start": "2024-01-15 13:46:40",
+    "verdict": "data_quality",
+    "notes": "A 565 km jump in 11.9 minutes is physically impossible vessel movement."
+  },
+  {
+    "anomaly_type": "speed_inconsistency",
+    "MMSI": 338202326,
+    "review_start": "2024-01-15 14:35:39",
+    "verdict": "data_quality",
+    "notes": "The 4,205-knot implied speed directly conflicts with 5.8-knot endpoint reports."
+  },
+  {
+    "anomaly_type": "speed_inconsistency",
+    "MMSI": 987654321,
+    "review_start": "2024-01-15 16:34:30",
+    "verdict": "data_quality",
+    "notes": "The impossible 4,423 km jump and sequential-looking MMSI indicate malformed, synthetic, or polluted AIS data."
+  }
+]

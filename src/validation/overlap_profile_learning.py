@@ -575,3 +575,67 @@ print(
 )
 
 
+# Step 7D: Inspect different kinds of signal gaps.
+
+signal_gap_df = detector_data["signal_gap"]
+
+
+signal_gap_review_columns = [
+    "MMSI",
+    "VesselName",
+    "gap_minutes",
+    "gap_distance_km",
+    "previous_port_distance_km",
+    "port_distance_km",
+    "endpoint_context",
+    "previous_sog",
+    "SOG",
+    "windspeed_kmh",
+    "visibility_m",
+    "suspicion_level",
+]
+
+
+smallest_movement_gaps = (
+    signal_gap_df
+    .sort_values("gap_distance_km")
+    [signal_gap_review_columns]
+    .head(5)
+)
+
+
+largest_movement_gaps = (
+    signal_gap_df
+    .sort_values(
+        "gap_distance_km",
+        ascending=False,
+    )
+    [signal_gap_review_columns]
+    .head(5)
+)
+
+
+longest_signal_gaps = (
+    signal_gap_df
+    .sort_values(
+        "gap_minutes",
+        ascending=False,
+    )
+    [signal_gap_review_columns]
+    .head(5)
+)
+
+
+print("\nINVESTIGATION STEP 7D")
+
+print("\nSignal gaps by endpoint context:")
+print(signal_gap_df["endpoint_context"].value_counts())
+
+print("\nSignal gaps with the smallest movement:")
+print(smallest_movement_gaps.to_string(index=False))
+
+print("\nSignal gaps with the largest movement:")
+print(largest_movement_gaps.to_string(index=False))
+
+print("\nLongest signal gaps:")
+print(longest_signal_gaps.to_string(index=False))

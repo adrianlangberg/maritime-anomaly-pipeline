@@ -220,8 +220,12 @@ __marimo__/
 # Project-specific ignores
 data/raw/*
 data/processed/*
+data/powerbi/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+!data/powerbi/.gitkeep
+!data/powerbi/maritime_anomaly_dashboard_priority.pbix
+!data/powerbi/maritime_anomaly_dashboard_priority_story_final.pbix
 .env
 .venv/
 venv/
